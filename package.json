@@ -1,0 +1,21 @@
+{
+  "name": "wavelink",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "gateway/simulator"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n backend,frontend -c blue,green \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "convex dev",
+    "dev:frontend": "npm run dev --workspace=frontend",
+    "dev:simulator": "npm run dev --workspace=gateway/simulator"
+  },
+  "dependencies": {
+    "convex": "^1.17.0"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "typescript": "^5.5.0"
+  }
+}

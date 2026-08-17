@@ -1,0 +1,13 @@
+node_modules/
+.env
+.env.local
+*.env
+!.env.example
+.next/
+dist/
+build/
+.convex/
+backend/_generated/
+*.log
+.DS_Store
+*.tsbuildinfo

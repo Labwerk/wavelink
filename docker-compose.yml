@@ -1,0 +1,154 @@
+services:
+  backend:
+    image: ghcr.io/get-convex/convex-backend:latest
+    ports:
+      - "3210:3210"
+      - "3211:3211"
+    # Overrides the image's default `./run_backend.sh` entrypoint to also
+    # generate an admin key once the server is up, writing it to the shared
+    # `convex-data` volume so the `push` service (below) can pick it up
+    # without any manual step — that's what makes plain `docker compose up`
+    # work end to end.
+    entrypoint: ["/usr/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        ./run_backend.sh &
+        BACKEND_PID=$$!
+        until curl -sf http://localhost:3210/version >/dev/null 2>&1; do sleep 1; done
+        ./generate_admin_key.sh > /convex/data/admin_key.txt
+        wait $$BACKEND_PID
+    environment:
+      # If you change INSTANCE_NAME, POSTGRES_DB (below) must match it with
+      # hyphens replaced by underscores — the self-hosted backend connects to
+      # a Postgres database named after INSTANCE_NAME and expects it to
+      # already exist. Defaults here are kept in sync for that reason.
+      - INSTANCE_NAME=${INSTANCE_NAME:-wavelink_local}
+      - INSTANCE_SECRET=${INSTANCE_SECRET}
+      - CONVEX_CLOUD_ORIGIN=${CONVEX_CLOUD_ORIGIN:-http://127.0.0.1:3210}
+      - CONVEX_SITE_ORIGIN=${CONVEX_SITE_ORIGIN:-http://127.0.0.1:3211}
+      # Must NOT include a database name or query params — just host:port
+      # credentials. See POSTGRES_DB below for how the database is chosen.
+      - POSTGRES_URL=${POSTGRES_URL:-}
+      - DO_NOT_REQUIRE_SSL=${DO_NOT_REQUIRE_SSL:-true}
+    volumes:
+      - convex-data:/convex/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3210/version"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    depends_on:
+      # `required: false` means: wait for postgres to be healthy if it's part
+      # of this run (`--profile production`), otherwise ignore it entirely
+      # (default SQLite-only run has no postgres service to wait for).
+      postgres:
+        condition: service_healthy
+        required: false
+
+  dashboard:
+    image: ghcr.io/get-convex/convex-dashboard:latest
+    ports:
+      - "6791:6791"
+    environment:
+      - NEXT_PUBLIC_DEPLOYMENT_URL=${CONVEX_CLOUD_ORIGIN:-http://127.0.0.1:3210}
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  # One-shot: pushes backend/schema.ts + functions to the backend and
+  # generates backend/_generated/ (which `frontend` needs to compile), using
+  # the admin key the backend wrote to the shared volume above. Runs once per
+  # `docker compose up` and exits; `frontend` waits for it to finish.
+  push:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      target: base
+    working_dir: /repo
+    environment:
+      - CONVEX_SELF_HOSTED_URL=http://backend:3210
+    volumes:
+      - .:/repo
+      - /repo/node_modules
+      - convex-data:/convex-data:ro
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        # A stale root .env.local from a previous `npx convex dev` run (e.g.
+        # against Convex Cloud via the native Quickstart) can leave a
+        # CONVEX_DEPLOYMENT value that conflicts with the self-hosted env
+        # vars below and makes the CLI refuse to run. This service always
+        # targets the self-hosted backend, so drop it and let the CLI
+        # rewrite it fresh.
+        rm -f /repo/.env.local
+        until [ -f /convex-data/admin_key.txt ]; do sleep 1; done
+        export CONVEX_SELF_HOSTED_ADMIN_KEY=$(cat /convex-data/admin_key.txt)
+        npx convex dev --once
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      target: dev
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_CONVEX_URL=${CONVEX_CLOUD_ORIGIN:-http://127.0.0.1:3210}
+    volumes:
+      - .:/repo
+      - /repo/node_modules
+      - /repo/frontend/.next
+    depends_on:
+      backend:
+        condition: service_healthy
+      push:
+        condition: service_completed_successfully
+
+  simulator:
+    build:
+      context: ./gateway/simulator
+    environment:
+      # Container-to-container URL (not the host-exposed CONVEX_CLOUD_ORIGIN,
+      # which the browser/CLI use from outside the compose network).
+      - CONVEX_URL=http://backend:3210
+      - SIMULATOR_INTERVAL_MS=${SIMULATOR_INTERVAL_MS:-2000}
+    volumes:
+      - ./gateway/simulator:/simulator
+      - /simulator/node_modules
+    depends_on:
+      backend:
+        condition: service_healthy
+      push:
+        condition: service_completed_successfully
+    profiles:
+      - simulator
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-convex}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      # Must equal INSTANCE_NAME above with hyphens replaced by underscores.
+      # postgres:17-alpine creates this database automatically on first boot
+      # (fresh volume only) via this env var — that's the whole "migration"
+      # step for self-hosted Convex; there's no separate migration command.
+      - POSTGRES_DB=${POSTGRES_DB:-wavelink_local}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-convex}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    profiles:
+      - production
+
+volumes:
+  convex-data:
+  postgres-data:
