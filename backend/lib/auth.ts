@@ -1,27 +1,25 @@
-// Shared server-side auth/role enforcement helper.
+// Shared server-side authorization (spec R1, R3, R4, R6).
 //
-// Implements spec `specs/auth-roles/spec.md` §6 (Server-Side Enforcement
-// Design): every protected query/mutation resolves the caller's `users` row
-// through Convex Auth and re-checks its role here — the client-supplied
-// role is never trusted (R2). All denial paths below throw the exact same
-// generic error, so a role mismatch, a deactivated account, and an
-// unauthenticated caller are indistinguishable to the caller (R4: fail
-// closed without leaking whether a resource exists).
+// The caller is resolved from the authenticated identity
+// (`getAuthUserId` -> `users._id`) and the role is read from the stored row
+// on every call - never from a token claim or a client-supplied value (R3).
+// Every denial path throws the same opaque error, so unauthenticated,
+// wrong-role, deactivated and unknown-capability callers are
+// indistinguishable (R6).
 
 import { getAuthUserId } from "@convex-dev/auth/server";
-import type { Doc } from "../_generated/dataModel";
+import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
+import { roleHasCapability } from "./permissions";
 
-export type Role = Doc<"users">["role"];
+export type { Role, Capability } from "./permissions";
 
-/** Generic, fail-closed message. Never vary this by denial reason (R4). */
+/** Generic, fail-closed message. Never vary this by denial reason (R6). */
 export const NOT_AUTHORIZED = "Not authorized";
 
 /**
- * Resolves the calling user's `users` row via Convex Auth's identity, or
- * `null` if unauthenticated or the row doesn't exist (e.g. not yet synced).
- * Does not throw and does not check `isActive` or role — use
- * `requireAuthenticatedUser`/`requireRole` for enforcement.
+ * Resolves the calling user's row, or `null` when unauthenticated or the row
+ * is missing. Does not check `isActive` or role.
  */
 export async function getCurrentUser(
   ctx: QueryCtx | MutationCtx,
@@ -30,40 +28,32 @@ export async function getCurrentUser(
   if (userId === null) {
     return null;
   }
-  return ctx.db
-    .query("users")
-    .withIndex("by_authId", (q) => q.eq("authId", userId))
-    .unique();
+  return ctx.db.get(userId);
 }
 
 /**
- * Enforces R1 + the "isActive" clause of §4: caller must be authenticated
- * and have an active `users` row, but any role is allowed. Use for reads
- * that spec §4's Role Matrix grants to all four roles (e.g.
- * `devices.listActive`, `telemetry.latestForDevice`).
+ * Loads `userId`'s row and requires it to be active and to hold
+ * `capability`. Deny-by-default: an unknown capability denies everyone.
  */
-export async function requireAuthenticatedUser(
+export async function requireCapabilityForUser(
   ctx: QueryCtx | MutationCtx,
+  userId: Id<"users"> | null,
+  capability: string,
 ): Promise<Doc<"users">> {
-  const user = await getCurrentUser(ctx);
-  if (user === null || !user.isActive) {
+  if (userId === null) {
+    throw new Error(NOT_AUTHORIZED);
+  }
+  const user = await ctx.db.get(userId);
+  if (user === null || !user.isActive || !roleHasCapability(user.role, capability)) {
     throw new Error(NOT_AUTHORIZED);
   }
   return user;
 }
 
-/**
- * Enforces R2/R3/R4: caller must be authenticated, active, and hold one of
- * `allowedRoles`. Use for every mutation/query restricted to specific roles
- * per spec §4's Role Matrix (e.g. `devices.register` -> ["admin"]).
- */
-export async function requireRole(
+/** Requires the authenticated caller to hold `capability`; returns their row. */
+export async function requireCapability(
   ctx: QueryCtx | MutationCtx,
-  allowedRoles: Role[],
+  capability: string,
 ): Promise<Doc<"users">> {
-  const user = await requireAuthenticatedUser(ctx);
-  if (!allowedRoles.includes(user.role)) {
-    throw new Error(NOT_AUTHORIZED);
-  }
-  return user;
+  return requireCapabilityForUser(ctx, await getAuthUserId(ctx), capability);
 }

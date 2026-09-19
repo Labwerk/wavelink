@@ -1,13 +1,12 @@
 import { v } from "convex/values";
-import { query } from "./_generated/server";
-import { requireAuthenticatedUser } from "./lib/auth";
+import { authedQuery } from "./lib/functions";
 
-// Role matrix (spec `specs/auth-roles/spec.md` §4): open to any
-// authenticated, active user (all four roles) — R9.
-export const latestForDevice = query({
+// Role matrix (spec `specs/auth-roles/spec.md` "Users & roles"): reading
+// telemetry needs `data.read`, which every role holds.
+export const latestForDevice = authedQuery({
+  capability: "data.read",
   args: { deviceId: v.id("devices") },
   handler: async (ctx, { deviceId }) => {
-    await requireAuthenticatedUser(ctx);
     const rows = await ctx.db
       .query("telemetry")
       .withIndex("by_device_and_ts", (q) => q.eq("deviceId", deviceId))
