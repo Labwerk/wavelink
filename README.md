@@ -6,8 +6,10 @@ Realtime dashboard for monitoring industrial robots/machines, built on [Convex](
 
 ## Status
 
-✅ Schema, live device/telemetry view, and telemetry simulator are working.
-🚧 Not yet built: auth/roles, alerting, historical playback, production deployment profile. See the [implementation plan](plans/implementation-plan.md) for details.
+✅ Schema, live device/telemetry view, telemetry simulator, and auth/roles
+(Convex Auth + Password provider, role-based access control — see
+[`specs/auth-roles/spec.md`](specs/auth-roles/spec.md)) are working.
+🚧 Not yet built: alerting, historical playback, production deployment profile. See the [implementation plan](plans/implementation-plan.md) for details.
 
 ## Architecture
 
@@ -70,12 +72,22 @@ First run opens a browser to log in and link a Convex project. This single comma
 
 > If `frontend/.env.local` doesn't already have the right `NEXT_PUBLIC_CONVEX_URL`, copy it from `frontend/.env.local.example` and set it to the `CONVEX_URL` printed by step 2 above, then restart `npm run dev`.
 
-**3. (Optional) seed live data**, in a separate terminal:
+**3. One-time auth setup** — the dashboard requires signing in (see [Authentication](#authentication) below). Convex Auth needs a signing key pair and your dev server's URL set as environment variables *on the Convex deployment* (not in a `.env` file):
+
+```sh
+npx @convex-dev/auth --web-server-url http://localhost:3000
+```
+
+This generates a `JWT_PRIVATE_KEY`/`JWKS` pair and sets them plus `SITE_URL` via `npx convex env set` against whichever deployment `npx convex dev` linked in step 2. Run it once per deployment; it's interactive (asks before overwriting existing values) and never prints or stores secrets in the repo.
+
+**4. (Optional) seed live data**, in a separate terminal:
 
 ```sh
 cd gateway/simulator
 CONVEX_URL=<same URL as step 2> npm run dev
 ```
+
+The simulator tries to self-register its 3 demo devices on startup, but `devices.register` is admin-only (see [Authentication](#authentication)) — on a fresh deployment it has no user identity, so this step is expected to log "Not authorized" and skip. Sign in as the bootstrap admin (the first account you create) and register the devices from the dashboard's admin-only "Register device" form first; telemetry for devices that don't exist yet is safely dropped, not stored.
 
 That's it for day-to-day development. Use **Docker deployment** below only when you need to test the self-hosted path itself.
 
@@ -114,13 +126,21 @@ docker compose up
 
 That's it. Under the hood, `backend` generates its own admin key on startup and a one-shot `push` service uses it to push `backend/`'s schema/functions automatically — no manual key copying or separate push command. `frontend` waits for `push` to finish before it starts. Open [http://localhost:3000](http://localhost:3000).
 
-**3. (Optional) seed live telemetry**, in a separate terminal:
+**3. One-time auth setup**, same as Quickstart step 3 but pointed at the self-hosted backend:
+
+```sh
+export CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3210
+export CONVEX_SELF_HOSTED_ADMIN_KEY=$(docker compose exec backend cat /convex/data/admin_key.txt)
+npx @convex-dev/auth --web-server-url http://localhost:3000
+```
+
+**4. (Optional) seed live telemetry**, in a separate terminal:
 
 ```sh
 docker compose --profile simulator up simulator
 ```
 
-Registers a few fake devices and posts a telemetry batch every `SIMULATOR_INTERVAL_MS` (default 2s). Refresh the dashboard to watch it update live.
+Tries to register a few fake devices and posts a telemetry batch every `SIMULATOR_INTERVAL_MS` (default 2s). As noted in Quickstart step 4, device registration is admin-only — sign in as the bootstrap admin and register the devices from the dashboard first, then refresh to watch telemetry update live.
 
 <details>
 <summary><strong>What's actually happening on <code>docker compose up</code></strong></summary>
@@ -163,6 +183,15 @@ docker compose exec backend cat /convex/data/admin_key.txt
 
 Regenerates fresh each time you start from a clean volume (`docker compose down -v`).
 
+## Authentication
+
+Sign-in is required to use the dashboard — see [`specs/auth-roles/spec.md`](specs/auth-roles/spec.md) for the full design. Summary:
+
+- **Provider:** [Convex Auth](https://labs.convex.dev/auth) with the Password provider (email + password, no external identity provider account needed). Set up once per deployment via `npx @convex-dev/auth` — see the Quickstart/Docker deployment steps above.
+- **Roles:** `viewer`, `operator`, `maintenance`, `admin` (parent spec [`specs/initial-spec.md`](specs/initial-spec.md) §4). Only `admin` can register/edit/deactivate devices or manage user roles; all four roles can view the live device/telemetry dashboard. Every check is enforced server-side (`backend/lib/auth.ts`) — the client-side gating in `frontend/app/page.tsx` only hides UI, it never substitutes for the real check.
+- **Bootstrap rule:** on a fresh deployment there's no admin yet to promote anyone, so the **first account ever created is automatically made `admin`**. This only ever fires once, while the `users` table is empty — every account after that defaults to `viewer` until an admin promotes it. Not a security hole, just how the very first admin gets created; see spec §5 for the detailed rationale.
+- **Tests:** `npm test` (Vitest + `convex-test`) exercises every Role Matrix cell (allow + deny), the bootstrap rule, `setRole` authorization, and that all denial reasons (unauthenticated, wrong role, deactivated account) produce the same error rather than leaking which one applies.
+
 ## Environment variables
 
 | Variable | Used by | Purpose |
@@ -174,6 +203,7 @@ Regenerates fresh each time you start from a clean volume (`docker compose down 
 | `DO_NOT_REQUIRE_SSL` | backend (local dev only) | Relaxes SSL requirement for local Postgres connections. |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | postgres (`--profile production` only) | Production storage credentials. Unused with the default SQLite setup. |
 | `SIMULATOR_INTERVAL_MS` | simulator (`--profile simulator` only) | How often the simulator posts a telemetry batch, in ms. |
+| `JWT_PRIVATE_KEY` / `JWKS` / `SITE_URL` | backend (Convex Auth) | Signing key pair + your web app's URL, set **on the Convex deployment itself** via `npx @convex-dev/auth` (see [Authentication](#authentication)) — never stored in a `.env` file or committed. |
 
 ## Production (self-hosted, Postgres-backed)
 

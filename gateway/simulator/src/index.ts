@@ -29,7 +29,15 @@ async function ensureDevicesRegistered() {
       await client.mutation(anyApi.devices.register, device);
       console.log(`Registered device ${device.externalId}`);
     } catch (err) {
-      // Already exists — expected on restarts.
+      // Expected on restarts ("already exists"). As of M2, `devices.register`
+      // is also admin-only (spec `specs/auth-roles/spec.md` §4) and this
+      // client has no user identity, so a fresh deployment will fail here
+      // with "Not authorized" instead — log it so that isn't mistaken for
+      // a crash. Register the simulated devices via the dashboard as an
+      // admin first (see README's "seed live data" note); telemetry for
+      // devices that don't exist yet is safely skipped by `ingest.recordBatch`.
+      const message = err instanceof Error ? err.message : String(err);
+      console.log(`Skipping registration for ${device.externalId}: ${message}`);
     }
   }
 }

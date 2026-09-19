@@ -8,6 +8,7 @@
     "start": "next start"
   },
   "dependencies": {
+    "@convex-dev/auth": "^0.0.95",
     "convex": "^1.17.0",
     "next": "^16.3.1",
     "react": "^18.3.0",

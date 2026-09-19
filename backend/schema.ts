@@ -1,7 +1,17 @@
+import { authTables } from "@convex-dev/auth/server";
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
 export default defineSchema({
+  // Convex Auth's own tables (authSessions, authAccounts, authRefreshTokens,
+  // authVerificationCodes, authVerifiers, authRateLimits). Its default
+  // `users` table is intentionally overridden below with our own shape
+  // (see spec `specs/auth-roles/spec.md` §2/§5/§6): our `createOrUpdateUser`
+  // callback in `backend/auth.ts` owns user-row creation, so none of
+  // Convex Auth's default `users` fields (email index for account linking,
+  // etc.) are required.
+  ...authTables,
+
   devices: defineTable({
     externalId: v.string(),
     name: v.string(),
