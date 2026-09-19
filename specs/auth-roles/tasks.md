@@ -1,134 +1,100 @@
-# Tasks: Auth & Roles (M2)
+# Tasks: Authentication & role-based access control
 
-Traces to `specs/auth-roles/spec.md` (R1–R11, §4–§8) and
-`plans/implementation-plan.md` Phase M2. Ordered for implementation.
+> Written by builder. Ordered by dependency. Every requirement in `spec.md` is
+> covered. Mark `- [x]` only when its acceptance check passes (typecheck + tests
+> run locally). Read `node_modules/next/dist/docs/` and the current `@convex-dev/auth`
+> Next.js guide before the frontend tasks — Next.js 16 differs from training data.
 
-## 1. Backend dependencies & setup
+## Setup
 
-- [x] Install `@convex-dev/auth` + `@auth/core` at the repo root (`backend/`
-      isn't its own npm package — deps live in root `package.json`, per
-      `convex.json`'s `functions: "backend/"`). (§2)
-- [x] Add `@convex-dev/auth` to `frontend/package.json` too (it needs the
-      `/react` subpath client-side), matching the existing pattern of
-      `convex` being listed in both root and `frontend/package.json`.
+- [ ] **T1** — Add deps: `@convex-dev/auth`, `@auth/core` (root/backend); confirm
+  `convex` version peer-req and bump if needed.
+  - Files: `package.json`, `package-lock.json`
+  - Satisfies: R1 (foundation)
+  - Acceptance: `npm install` clean; `npx convex dev` starts without version errors.
 
-## 2. Schema (§9 parent spec, §2/§5/§6 this spec)
+- [ ] **T2** — Add test harness: `convex-test` + `vitest` + config.
+  - Files: `package.json`, `vitest.config.ts`, `backend/vitest-setup` if needed
+  - Satisfies: enables R3–R7 tests
+  - Acceptance: `npm test` runs an empty suite green.
 
-- [x] Merge Convex Auth's `authTables` into `backend/schema.ts`
-      (`authSessions`, `authAccounts`, `authRefreshTokens`,
-      `authVerificationCodes`, `authVerifiers`, `authRateLimits`), while
-      keeping the existing custom `users` table (already matches the spec:
-      `authId`, `name`, `email`, `role`, `isActive`, `by_authId`, `by_role`)
-      as an explicit override of `authTables.users` — our own
-      `createOrUpdateUser` callback (see §4 below) owns user-row creation,
-      so none of Convex Auth's default `users` fields are needed.
+## Schema & auth core
 
-## 3. Auth wiring (§2 decision: Convex Auth + Password provider)
+- [ ] **T3** — Schema: add `...authTables`; redefine `users` with Convex Auth base
+  fields + `role` (4-literal union) + `isActive`; keep `by_role` index; drop `authId`.
+  - Files: `backend/schema.ts`
+  - Satisfies: R2
+  - Acceptance: `convex dev` typechecks; `alertRules.createdBy`/`alerts.acknowledgedBy` still compile.
 
-- [x] `backend/auth.config.ts` — JWT provider config
-      (`{ domain: CONVEX_SITE_URL, applicationID: "convex" }`).
-- [x] `backend/auth.ts` — `convexAuth({ providers: [Password] })`, exporting
-      `auth`, `signIn`, `signOut`, `store`, `isAuthenticated` (file/export
-      names are load-bearing: the React client hardcodes `auth:signIn` /
-      `auth:signOut` function references).
-- [x] `backend/http.ts` — `auth.addHttpRoutes(http)` (JWKS / OIDC discovery
-      endpoints Convex needs to validate the auth provider's tokens).
-- [x] Document the `JWT_PRIVATE_KEY` / `JWKS` / `SITE_URL` deployment env
-      vars Convex Auth requires (generated locally, set via
-      `npx convex env set` — never committed) in the README.
+- [ ] **T4** — Convex Auth wiring: `auth.ts` (Password provider + `afterUserCreatedOrUpdated`
+  assigning role from `INITIAL_ADMIN_EMAILS` else `viewer`), `auth.config.ts`, `http.ts` routes.
+  - Files: `backend/auth.ts`, `backend/auth.config.ts`, `backend/http.ts`
+  - Satisfies: R2, R13
+  - Acceptance: sign-up creates a user with the expected default/admin role (test).
 
-## 4. Bootstrap rule + user sync (§5, R5, R11)
+- [ ] **T5** — Authorization helpers: `getCurrentUser`, `requireAuth`, `requireRole(min)`
+  with numeric rank; uniform opaque error for forbidden vs not-found.
+  - Files: `backend/lib/auth.ts`
+  - Satisfies: R3, R4, R5, R6
+  - Acceptance: unit tests — each role allowed vs forbidden action; deny-by-default; opaque error.
 
-- [x] `backend/users.ts`: `syncUserOnLogin(ctx, args)` — called from
-      `auth.ts`'s `createOrUpdateUser` callback. No-ops (returns the
-      existing id) on repeat logins. On first login: single `.first()` read
-      to check whether `users` is empty (cheap, bounded, runs once ever per
-      deployment) → `admin` if so, else `viewer`; inserts the row, then
-      patches `authId` to the row's own id (Convex Auth identifies callers
-      by this id — see `getAuthUserId`).
+## Apply RBAC to existing functions
 
-## 5. Shared server-side role-check helper (§6, R2/R4)
+- [ ] **T6** — Gate reads with `requireAuth`: `devices.listActive`, `devices.get`,
+  `telemetry.latestForDevice`.
+  - Files: `backend/devices.ts`, `backend/telemetry.ts`
+  - Satisfies: R1, R3
+  - Acceptance: unauth call rejected; viewer call succeeds (test).
 
-- [x] `backend/lib/auth.ts`:
-  - `getCurrentUser(ctx)` — resolves the caller's `users` row via
-    `getAuthUserId` + `by_authId` index lookup, or `null`.
-  - `requireAuthenticatedUser(ctx)` — throws unless authenticated + active
-    (any role). For Role Matrix cells open to all four roles.
-  - `requireRole(ctx, allowedRoles)` — throws unless authenticated, active,
-    and role ∈ `allowedRoles`.
-  - All throws use the same generic `NOT_AUTHORIZED` message/exception
-    shape, regardless of *why* (unauthenticated vs. inactive vs. wrong
-    role) — R4 non-leakage.
+- [ ] **T7** — Gate device writes with `requireRole(admin)` (remove the M2 TODO):
+  `devices.register`, `devices.update`, `devices.deactivate`.
+  - Files: `backend/devices.ts`
+  - Satisfies: R5
+  - Acceptance: viewer/operator denied, admin allowed (test).
 
-## 6. `users.*` functions (§10, R6/R7/R8)
+- [ ] **T8** — Confirm `ingest.recordBatch` stays service-auth only (no user-role guard);
+  document the service-token expectation in a comment.
+  - Files: `backend/ingest.ts`
+  - Satisfies: R12
+  - Acceptance: batch write works with no user session; a user session can't substitute (test/asserted).
 
-- [x] `users.me` (query) — returns `getCurrentUser(ctx)`; `null` when
-      unauthenticated, never throws (frontend uses this to decide
-      sign-in-screen vs. dashboard).
-- [x] `users.list` (query, admin-only via `requireRole`).
-- [x] `users.setRole` (mutation, admin-only via `requireRole`; validates the
-      target user exists, throws a distinct "User not found" for a bad id
-      — this is post-authorization data validation, not an auth denial, so
-      R4 doesn't apply to it).
+## User management
 
-## 7. Retrofit `devices.ts` / `telemetry.ts` (R9, §4 Role Matrix)
+- [ ] **T9** — `users.me` (caller profile+role or null), `users.list` (admin),
+  `users.setRole` (admin; validate target + role).
+  - Files: `backend/users.ts`
+  - Satisfies: R7, R8, R11
+  - Acceptance: non-admin denied on list/setRole; admin succeeds; `setRole` change reflected (test).
 
-- [x] `devices.register` / `update` / `deactivate` → `requireRole(ctx,
-      ["admin"])`; remove the `TODO(M2)` comment.
-- [x] `devices.listActive` / `devices.get` / `telemetry.latestForDevice` →
-      `requireAuthenticatedUser(ctx)` (open to all four roles per the Role
-      Matrix — no role is denied read access to live device/telemetry
-      views).
+## Frontend
 
-## 8. Frontend (R10)
+- [ ] **T10** — Provider + middleware: `ConvexAuthNextjsProvider`, `middleware.ts`
+  protecting app routes.
+  - Files: `frontend/app/providers.tsx`, `frontend/middleware.ts`
+  - Satisfies: R1, R10
+  - Acceptance: signed-out hit on `/` redirects to sign-in; session persists across reload.
 
-- [x] Read `frontend/AGENTS.md` + the bundled Next.js docs
-      (`node_modules/next/dist/docs/`) before touching frontend code — this
-      Next.js version deprecates `middleware.js` in favor of `proxy.js`;
-      since this app is fully client-rendered (no SSR auth checks needed),
-      neither is used here — auth is handled entirely client-side via
-      `@convex-dev/auth/react`.
-- [x] `frontend/app/providers.tsx` — swap `ConvexProvider` for
-      `ConvexAuthProvider`.
-- [x] `frontend/app/page.tsx`:
-  - Sign-in/sign-up screen (email+password via `useAuthActions().signIn`)
-    shown whenever `useConvexAuth().isAuthenticated` is false.
-  - Dashboard reads `users.me` for the caller's role and gates the
-    register-device form and the deactivate button to `role === "admin"`.
-    Server-side `requireRole` checks remain the actual enforcement point.
+- [ ] **T11** — Sign-in page (email+password, no public sign-up) + sign-out control.
+  - Files: `frontend/app/signin/page.tsx`, `frontend/app/page.tsx`
+  - Satisfies: R10
+  - Acceptance: valid creds sign in; sign-out returns to protected state.
 
-## 9. Test framework + tests (§7)
+- [ ] **T12** — Role-based UI gating on the dashboard via `useQuery(api.users.me)`.
+  - Files: `frontend/app/page.tsx`
+  - Satisfies: R8, R9
+  - Acceptance: viewer sees no admin/operator controls; admin sees user-management entry.
 
-- [x] Add Vitest + `convex-test` (+ `@edge-runtime/vm`) as dev
-      dependencies; `npm run test` → `vitest run`. Test files live in a
-      top-level `tests/` directory (outside `backend/`, which
-      `convex.json` scopes as the deployable functions dir) so
-      test-only code (`import.meta.glob`, vitest globals) is never at risk
-      of being bundled into a real deployment.
-- [x] `tests/users.test.ts`: bootstrap (first user → admin, next → viewer,
-      repeat login no-ops), `users.me` (null when unauthenticated, own
-      profile when authenticated), `users.list` (deny non-admin +
-      unauthenticated, allow admin), `users.setRole` (deny non-admin, admin
-      success reflected in a subsequent `me`/`list`), deactivated-admin
-      rejection, and the R4 error-message-parity check across
-      unauthenticated/wrong-role/deactivated denials.
-- [x] `tests/devices.test.ts`: one test per Role Matrix cell — all four
-      roles allowed on `listActive`/`get`/`latestForDevice`, unauthenticated
-      denied on all three; viewer/operator/maintenance denied on
-      `register`/`update`/`deactivate`, admin allowed on all three.
+## Config & docs
 
-## 10. Docs & plan bookkeeping
+- [ ] **T13** — Env vars for Convex Auth + `INITIAL_ADMIN_EMAILS`; document first-admin
+  bootstrap and the sign-in flow in README.
+  - Files: `.env.example`, `frontend/.env.local.example`, `README.md`
+  - Satisfies: R13
+  - Acceptance: following README on a clean deploy yields a working admin account.
 
-- [x] `plans/implementation-plan.md`: check off Phase M2's checklist items
-      and update "Next steps (resume here)".
-- [x] `README.md`: update the Status line (auth/roles no longer "not yet
-      built"), document the new env vars, and note the bootstrap rule so
-      it isn't mistaken for a security hole.
+## Verification
 
-## 11. Verification (§8 Acceptance Criteria)
-
-- [x] `npm test` (Vitest + convex-test) passes — one test per Role Matrix
-      cell, bootstrap, `setRole` authorization, and R4 non-leakage.
-- [x] `npx tsc --noEmit` clean for `backend/`, `tests/`, and `frontend/`.
-- [x] `npx convex codegen` (offline, no live deployment reachable in this
-      environment — see report) pushes cleanly with no schema/type errors.
+- [ ] **T14** — Full pass: `convex dev` typecheck clean, `npm test` green, manual
+  smoke of sign-in → role-gated dashboard. Hand to reviewer.
+  - Satisfies: all
+  - Acceptance: all tests pass; reviewer confirms R1–R13.

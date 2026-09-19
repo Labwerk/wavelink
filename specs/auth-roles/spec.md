@@ -1,118 +1,137 @@
-# Feature Spec: Auth & Roles (M2)
+# Spec: Authentication & role-based access control
 
-**Status:** Draft v0.1 — SDD feature spec, scoped from `specs/initial-spec.md`
-**Milestone:** M2 — Auth & roles (see `plans/implementation-plan.md` Phase M2)
-**Last updated:** 2026-09-19
+> Written by spec-writer. WHAT and WHY only — no technology, no code.
+> Feature slug: `auth-roles`. Realizes milestone **M2** of [`../foundation/plan.md`](../foundation/plan.md)
+> and section **§6.5** of [`../foundation/spec.md`](../foundation/spec.md).
 
-## 1. Scope
+## Overview
 
-Implements `specs/initial-spec.md` §4 (Users & Roles), §6.5 (Auth & Access Control),
-the `users.*` rows of §10 (Function Plan), and `plans/implementation-plan.md`
-Phase M2 in full. Out of scope: alerting (M3), historical playback (M4),
-deployability (M5) — those phases are untouched by this feature.
+The dashboard currently has no authentication — anyone reaching it can see all
+device and telemetry data and, once the write paths exist, act on it. This
+feature adds sign-in and enforces role-based access so that every user is
+identified, and each user can only see and do what their role permits. Access
+control is enforced on the server for every protected operation, not just hidden
+in the UI. Without this, the system cannot be exposed beyond a trusted local
+network and cannot attribute state-changing actions (alert acknowledgement,
+device edits) to a person.
 
-## 2. Decision: Auth Provider
+## Goals
 
-The parent spec (§14) leaves the auth provider as an open question between
-Convex Auth, Clerk, WorkOS, or custom OIDC. This feature spec resolves it:
+- Require authentication for all access to product data.
+- Map every authenticated user to exactly one role and enforce that role's
+  permissions server-side on every protected operation.
+- Let admins manage which users hold which roles.
+- Gate the UI so users are only shown actions they are allowed to perform, backed
+  by (never replacing) server enforcement.
 
-**Decision: Convex Auth (`@convex-dev/auth`) with the Password provider.**
+## Non-goals
 
-Rationale:
-- Native to Convex — no external account/SaaS dependency, consistent with
-  this project's self-hosted, `docker compose up`-first deployment story
-  (parent spec §12, README Quickstart).
-- The parent spec's own "Best Practices" table (§11) already cites
-  [Convex Auth RBAC example](https://github.com/get-convex/convex-auth-with-role-based-permissions)
-  as the pattern for server-side role checks — this feature follows that
-  reference implementation's shape.
-- Password provider needs no external identity provider credentials,
-  keeping the Quickstart ("no prior Convex experience", no extra signup)
-  intact. Email/password is sufficient for v1; swapping in an OAuth
-  provider later is additive (Convex Auth supports multiple providers)
-  and does not require a schema migration since `users.authId` already
-  stores an opaque provider-assigned identifier.
+- Choosing or building a specific auth provider/mechanism (planner decides).
+- Multi-tenant / multi-site isolation (explicitly deferred in the foundation spec).
+- Per-device or per-zone access control lists — roles are system-wide in v1.
+- Device *control* authorization (bidirectional command safety) — out of scope.
+- Self-service public sign-up, MFA, and SSO/SAML federation — not in v1 unless the
+  chosen provider gives them for free.
+- Authorization for the ingestion/gateway path beyond confirming it uses a
+  *service* credential, not an end-user role.
 
-This is a reversible choice at the provider level (Convex Auth supports
-adding/swapping providers without touching the `users` table shape), so it
-does not block this phase.
+## Users & roles
 
-## 3. Requirements (traced to parent spec)
+Four roles, from least to most privileged. Each higher role includes everything
+the ones below it can do.
 
-| # | Requirement | Source |
-|---|---|---|
-| R1 | All dashboard access requires authentication; unauthenticated requests are rejected. | §6.5.17 |
-| R2 | Every query/mutation/action that reads or writes protected data enforces a server-side role check against the caller's `users` row — never trusts a client-supplied role. | §6.5.18 |
-| R3 | Role assignment (`users.setRole`) is callable by Admins only. | §6.5.19 |
-| R4 | Unauthorized calls fail closed (deny by default): throw before touching data, and the error must not reveal whether the target resource exists. | §6.5.20 |
-| R5 | `users` row is created/synced on first login (`authId`, `name`, `email`, default `role`, `isActive`). | §9 schema, §10 `users.me` |
-| R6 | `users.me` returns the current user's profile + role for client-side UI gating; server still re-checks role per protected call. | §10 |
-| R7 | `users.list` (admin-only) lists all users for role management. | §10 |
-| R8 | `users.setRole` (admin-only) changes a target user's role. | §10 |
-| R9 | Retrofit role checks onto `devices.register`/`update`/`deactivate` (admin only per plan Phase M2); reads (`devices.listActive`, `devices.get`, `telemetry.latestForDevice`) require only authentication (any of the four roles), since no role in §4 is denied read access to live device/telemetry views. | Phase M2 task list, §4 |
-| R10 | Frontend gates device-management actions (register/edit/deactivate UI) by role, and shows a sign-in screen when unauthenticated. Server-side checks remain the actual enforcement point. | Phase M2 task list |
-| R11 | New users default to the `viewer` role (least privilege) until an admin promotes them; there being no admin yet (fresh deployment) must not deadlock role assignment. | §4, deny-by-default principle |
+| Role | Can do |
+|---|---|
+| **Viewer** | View live dashboards and historical data. No state changes. |
+| **Operator** | Everything Viewer can, plus acknowledge/clear alerts and add operational notes. |
+| **Maintenance** | Everything Operator can, plus historical playback/export and device diagnostic detail. |
+| **Admin** | Everything above, plus register/edit/decommission devices, manage alert rules, and manage users and roles. |
 
-## 4. Role Matrix
+## User stories
 
-| Function | viewer | operator | maintenance | admin |
-|---|---|---|---|---|
-| `devices.listActive`, `devices.get`, `telemetry.latestForDevice` | ✅ | ✅ | ✅ | ✅ |
-| `devices.register`, `devices.update`, `devices.deactivate` | ❌ | ❌ | ❌ | ✅ |
-| `users.me` | ✅ (own row) | ✅ | ✅ | ✅ |
-| `users.list`, `users.setRole` | ❌ | ❌ | ❌ | ✅ |
+- As an unauthenticated visitor, I am sent to a login screen and shown no product
+  data until I sign in.
+- As any authenticated user, I stay signed in across page reloads and can sign out.
+- As a viewer, I can see factory-health dashboards but see no controls for actions
+  I cannot perform.
+- As an operator, I can acknowledge an active alert, and the record shows it was me.
+- As an admin, I can see all users and change any user's role.
+- As an admin setting up a fresh deployment, I can establish the first admin
+  account without needing an admin to already exist.
+- As a developer, I can trust that a user cannot perform a higher-role action by
+  calling the backend directly, even if the UI would have hidden it.
 
-All rows above additionally require the caller to be authenticated (R1) and
-`isActive: true` on their `users` row; a deactivated user is treated as
-unauthorized for every protected function.
+## Requirements
 
-## 5. Bootstrap / First-Admin Problem (R11 detail)
+Each is a single, independently testable statement. IDs are stable — the planner
+and reviewer reference them.
 
-On a fresh deployment there is no admin to promote the first user. Resolve
-by: the **first** user ever created in the `users` table is auto-assigned
-`admin` on creation; every subsequent first-login user defaults to
-`viewer`. Implemented by checking whether the `users` table is empty at
-the point of the sync-on-login mutation (single `.first()` read against an
-existing index — cheap, no unbounded scan). Document this behavior in the
-spec (here) and in the tasks/README so it isn't mistaken for a security
-hole — it only applies while the table is empty, i.e. once, ever, per
-deployment.
+- **R1** — All access to product data requires an authenticated session;
+  unauthenticated requests receive no product data and are directed to sign in.
+- **R2** — Every authenticated user is associated with exactly one role from
+  {viewer, operator, maintenance, admin}.
+- **R3** — Every server operation that reads or writes protected data checks the
+  caller's role **on the server**, derived from stored user identity — never from
+  a client-supplied role value.
+- **R4** — Access is deny-by-default: an operation with no explicit permission for
+  the caller's role is refused.
+- **R5** — The role→capability mapping matches the "Users & roles" table above,
+  with higher roles inheriting all lower-role capabilities.
+- **R6** — A refused authorization fails closed and does not reveal whether the
+  target data exists (no distinct "exists but forbidden" vs "not found" leak).
+- **R7** — Admins, and only admins, can list users and assign or change a user's role.
+- **R8** — The current user's own identity and role are retrievable for UI gating;
+  the server still re-checks role on every protected call regardless.
+- **R9** — The UI hides or disables controls for actions the current user's role
+  cannot perform.
+- **R10** — A user can sign in and sign out; a signed-in session persists across a
+  page reload until sign-out or expiry.
+- **R11** — Every state-changing operation is attributable to the authenticated
+  user who performed it (e.g. an acknowledged alert records who and when).
+- **R12** — The ingestion/gateway entry point authenticates with a service
+  credential distinct from end-user auth and is not governed by the four user roles.
+- **R13** — A fresh deployment has a defined, documented way to establish the first
+  admin account without a pre-existing admin.
 
-## 6. Server-Side Enforcement Design
+## Acceptance criteria
 
-- Add `backend/lib/auth.ts` (or equivalent) exporting a shared helper, e.g.
-  `requireRole(ctx, allowedRoles)` / `getCurrentUser(ctx)`, used by every
-  protected query/mutation. It:
-  1. Resolves the authenticated identity via Convex Auth's `ctx.auth.getUserIdentity()`.
-  2. Throws (deny-closed) if unauthenticated.
-  3. Looks up the caller's `users` row by `authId` (`by_authId` index).
-  4. Throws if no row, `isActive: false`, or role not in the allowed set.
-  5. Returns the resolved `users` row/role to the caller for functions that
-     need it (e.g. `users.me`).
-- Error messages for auth/role failures must be generic (e.g. "Not
-  authorized") and identical regardless of *why* access was denied, so they
-  don't leak whether a device/user/record exists (R4).
+- **R1** — Hitting any product route or data query while signed out returns no
+  data and yields a sign-in prompt.
+- **R2** — Each user record resolves to one and only one role; no user can hold
+  zero or multiple roles.
+- **R3** — A request carrying a forged/elevated client-side role value is still
+  evaluated at the actual stored role and refused if that role lacks permission.
+- **R4** — A newly added protected operation with no role rule defined denies all
+  callers by default (verified by test).
+- **R5** — For each role, a test exercises one allowed and one forbidden action and
+  gets the expected allow/deny.
+- **R6** — A forbidden request for an existing resource and for a non-existent one
+  are indistinguishable to the caller.
+- **R7** — A non-admin calling the user-list or set-role operation is denied; an
+  admin succeeds.
+- **R8** — The "current user" lookup returns the caller's role; a protected call
+  still re-checks and denies when appropriate even if the client claims otherwise.
+- **R9** — For a viewer session, no acknowledge/edit/admin controls are rendered
+  or are disabled.
+- **R10** — After sign-in and a page reload the session is still valid; after
+  sign-out, protected data is inaccessible again.
+- **R11** — Acknowledging an alert records the acting user's identity and timestamp,
+  visible in the alert's history.
+- **R12** — The gateway can post a telemetry batch with its service credential and
+  without any user session; a user session cannot be used in its place.
+- **R13** — Following the documented bootstrap step on a clean deployment yields a
+  working admin account.
 
-## 7. Test Plan
+## Open questions
 
-Backend function tests using `convex-test` (+ Vitest) exercising, at
-minimum, one test per Role Matrix cell that matters (deny + allow), plus:
-- Unauthenticated call to a protected function is rejected.
-- Deactivated user is rejected even with a valid role.
-- First-user-becomes-admin bootstrap behavior.
-- `users.setRole` by non-admin is rejected; by admin succeeds and is
-  reflected in a subsequent `users.me`/`users.list` call.
-- Error message parity between "role denied" and "record not found" style
-  failures where applicable (R4 non-leakage).
-
-## 8. Acceptance Criteria
-
-- All items in §3 (R1–R11) implemented and covered by a passing automated
-  test (§7).
-- Manual security pass (parent spec success metric, §15): attempting every
-  mutation/query in the Role Matrix as every role produces the expected
-  allow/deny result.
-- `plans/implementation-plan.md` Phase M2 checklist fully checked off and
-  its exit criteria met.
-- Frontend shows a sign-in flow when unauthenticated and hides/disables
-  admin-only actions for non-admin roles, without weakening server checks.
+- **Auth provider** — Convex Auth, Clerk, WorkOS, or custom OIDC? Affects the shape
+  of stored user identity and the login flow. (Foundation open question; planner to
+  resolve with the team.)
+- **Account provisioning** — admin-invites-only, or self-service sign-up gated by
+  an allowlist/domain?
+- **First-admin bootstrap** — env-configured seed admin, a one-time setup token, or
+  a CLI/seed script? (Drives R13.)
+- **Maintenance role in v1** — ship all four roles now, or defer maintenance until
+  historical playback lands?
+- **Session expiry policy** — idle timeout vs fixed lifetime; provider default vs
+  explicit.
