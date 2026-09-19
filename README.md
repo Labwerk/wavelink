@@ -2,12 +2,12 @@
 
 Realtime dashboard for monitoring industrial robots/machines, built on [Convex](https://convex.dev).
 
-> 📄 Full spec: [`specs/initial-spec.md`](specs/initial-spec.md) · Build plan: [`plans/implementation-plan.md`](plans/implementation-plan.md)
+> 📄 Full spec: [`specs/foundation/spec.md`](specs/foundation/spec.md) · Build plan: [`specs/foundation/plan.md`](specs/foundation/plan.md) · SDD workflow: [`specs/README.md`](specs/README.md)
 
 ## Status
 
 ✅ Schema, live device/telemetry view, and telemetry simulator are working.
-🚧 Not yet built: auth/roles, alerting, historical playback, production deployment profile. See the [implementation plan](plans/implementation-plan.md) for details.
+🚧 Not yet built: auth/roles, alerting, historical playback, production deployment profile. See the [foundation plan](specs/foundation/plan.md) for details.
 
 ## Architecture
 
@@ -39,8 +39,49 @@ flowchart LR
 | `backend/` | Convex schema (`schema.ts`) + functions. Convex CLI commands run from the **repo root**, which finds this folder via `convex.json`. |
 | `frontend/` | Next.js dashboard app. Imports generated types from `../backend/_generated/`. |
 | `gateway/simulator/` | Standalone telemetry simulator — stands in for a real device-protocol adapter until one is built. |
-| `specs/` | SDD specification documents. |
-| `plans/` | Phased implementation plans. |
+| `specs/` | SDD artifacts, one folder per feature (`spec.md` → `plan.md` → `tasks.md` → `review.md`). See [`specs/README.md`](specs/README.md). Foundation docs live in [`specs/foundation/`](specs/foundation/). |
+| `.claude/agents/` | The four SDD agents (spec-writer, planner, builder, reviewer) that drive the workflow. |
+
+## Development workflow (Spec-Driven Development)
+
+Features are built through four specialized agents in [`.claude/agents/`](.claude/agents/),
+each with its own isolated context, handing off to the next through files under
+`specs/<feature-slug>/`:
+
+```
+spec-writer  ──spec.md──▶  planner  ──plan.md──▶  builder  ──tasks.md + code──▶  reviewer  ──review.md
+   WHAT / WHY              HOW + web research      break down + implement          verify vs spec
+```
+
+| Agent | Produces | Can it touch code? |
+|---|---|---|
+| `spec-writer` | `spec.md` — goals, non-goals, user stories, numbered requirements `R1…Rn` | No (read/write docs only) |
+| `planner` | `plan.md` — architecture, tech decisions, data model, sources; **researches the web** | No (docs + web only) |
+| `builder` | `tasks.md` then the implementation, one task at a time with tests | Yes (only agent with shell) |
+| `reviewer` | `review.md` — PASS/FAIL, per-requirement coverage, test results | No (read-only on source) |
+
+**Load the agents** (after cloning, or when they change): run `/agents` in Claude
+Code, or restart the session.
+
+**Run a feature** — review the output file between each step:
+
+```
+Use the spec-writer subagent for: <feature idea>
+Use the planner subagent for specs/<feature-slug>
+Use the builder subagent for specs/<feature-slug>
+Use the reviewer subagent for specs/<feature-slug>
+```
+
+If the reviewer returns FAIL or PASS WITH ISSUES, hand `review.md` back to the
+builder, fix, and review again — that loop is the quality gate.
+
+**Start a new feature** by copying the templates:
+
+```sh
+cp -r specs/_template specs/<feature-slug>
+```
+
+Full details and the artifact convention live in [`specs/README.md`](specs/README.md).
 
 ## Prerequisites
 
@@ -198,4 +239,4 @@ docker compose --profile production up
 
 Same one-command flow as Docker deployment above — Postgres becomes healthy before the backend starts (wired via `depends_on: ... required: false` in `docker-compose.yml`, so the same file still works without `--profile production` for the plain SQLite flow), then `push` and `frontend` proceed exactly as before.
 
-Still open: SQLite-vs-Postgres and self-hosted-vs-Cloud-Cloud choices for an actual production pilot deployment (not just local verification) — see the "Self-hosted storage choice" open question in [`plans/implementation-plan.md`](plans/implementation-plan.md), which also tracks Phase M5's remaining scope.
+Still open: SQLite-vs-Postgres and self-hosted-vs-Cloud-Cloud choices for an actual production pilot deployment (not just local verification) — see the "Self-hosted storage choice" open question in [`specs/foundation/plan.md`](specs/foundation/plan.md), which also tracks Phase M5's remaining scope.
