@@ -12,6 +12,8 @@
     "dev:simulator": "npm run dev --workspace=gateway/simulator"
   },
   "dependencies": {
+    "@auth/core": "^0.41.3",
+    "@convex-dev/auth": "^0.0.95",
     "convex": "^1.17.0"
   },
   "devDependencies": {
