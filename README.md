@@ -6,11 +6,13 @@ Realtime dashboard for monitoring industrial robots/machines, built on [Convex](
 
 ## Status
 
-✅ Schema, live device/telemetry view, and telemetry simulator are working.
-🚧 Auth/roles (Convex Auth + Password provider, role-based access control — see
-[`specs/auth-roles/spec.md`](specs/auth-roles/spec.md)) is in progress, being
-reconciled with the SDD spec/plan. Not yet built: alerting, historical
-playback, production deployment profile. See the [foundation plan](specs/foundation/plan.md) for details.
+| Feature | State |
+|---|---|
+| Schema, live device/telemetry view, telemetry simulator | ✅ Working |
+| Auth & roles (sign-in + role-based access control) | 🚧 Implemented, not yet signed off — see [Authentication](#authentication) |
+| Alerting, historical playback, production deployment profile | ⬜ Not started |
+
+See the [foundation plan](specs/foundation/plan.md) for what each milestone covers.
 
 ## Architecture
 
@@ -114,22 +116,24 @@ First run opens a browser to log in and link a Convex project. This single comma
 
 > If `frontend/.env.local` doesn't already have the right `NEXT_PUBLIC_CONVEX_URL`, copy it from `frontend/.env.local.example` and set it to the `CONVEX_URL` printed by step 2 above, then restart `npm run dev`.
 
-**3. One-time auth setup** — the dashboard requires signing in (see [Authentication](#authentication) below). Convex Auth needs a signing key pair and your dev server's URL set as environment variables *on the Convex deployment* (not in a `.env` file):
+**3. One-time auth setup** — the dashboard now requires signing in, so Convex needs a signing key before anyone can log in:
 
 ```sh
 npx @convex-dev/auth --web-server-url http://localhost:3000
 ```
 
-This generates a `JWT_PRIVATE_KEY`/`JWKS` pair and sets them plus `SITE_URL` via `npx convex env set` against whichever deployment `npx convex dev` linked in step 2. Run it once per deployment; it's interactive (asks before overwriting existing values) and never prints or stores secrets in the repo.
+Run this **once per deployment**. It generates a key pair and stores it *on the Convex deployment itself* (`JWT_PRIVATE_KEY`, `JWKS`, `SITE_URL`) — nothing is written to a file in the repo, so there's no secret to accidentally commit.
 
-**4. (Optional) seed live data**, in a separate terminal:
+**4. Create your admin account** — open [http://localhost:3000](http://localhost:3000) and sign up. **The first account created on a deployment becomes the admin**; everyone after that starts as a read-only `viewer`. See [Authentication](#authentication) for what each role can do.
+
+**5. (Optional) seed live data**, in a separate terminal:
 
 ```sh
 cd gateway/simulator
 CONVEX_URL=<same URL as step 2> npm run dev
 ```
 
-The simulator tries to self-register its 3 demo devices on startup, but `devices.register` is admin-only (see [Authentication](#authentication)) — on a fresh deployment it has no user identity, so this step is expected to log "Not authorized" and skip. Sign in as the bootstrap admin (the first account you create) and register the devices from the dashboard's admin-only "Register device" form first; telemetry for devices that don't exist yet is safely dropped, not stored.
+> ⚠️ Do step 4 first. The simulator tries to register its 3 demo devices on startup, but registering a device is admin-only — with no user session it just logs `Not authorized` and skips. Sign in as your admin, add the devices via the dashboard's **Register device** form, then restart the simulator. (Telemetry for a device that doesn't exist is safely dropped, not stored.)
 
 That's it for day-to-day development. Use **Docker deployment** below only when you need to test the self-hosted path itself.
 
@@ -176,13 +180,15 @@ export CONVEX_SELF_HOSTED_ADMIN_KEY=$(docker compose exec backend cat /convex/da
 npx @convex-dev/auth --web-server-url http://localhost:3000
 ```
 
-**4. (Optional) seed live telemetry**, in a separate terminal:
+**4. Create your admin account** — open [http://localhost:3000](http://localhost:3000) and sign up. First account on the deployment becomes admin, same as Quickstart step 4.
+
+**5. (Optional) seed live telemetry**, in a separate terminal:
 
 ```sh
 docker compose --profile simulator up simulator
 ```
 
-Tries to register a few fake devices and posts a telemetry batch every `SIMULATOR_INTERVAL_MS` (default 2s). As noted in Quickstart step 4, device registration is admin-only — sign in as the bootstrap admin and register the devices from the dashboard first, then refresh to watch telemetry update live.
+Posts a telemetry batch every `SIMULATOR_INTERVAL_MS` (default 2s). Same caveat as Quickstart: register the demo devices from the dashboard as admin first, otherwise the simulator has nothing to post against.
 
 <details>
 <summary><strong>What's actually happening on <code>docker compose up</code></strong></summary>
@@ -227,12 +233,62 @@ Regenerates fresh each time you start from a clean volume (`docker compose down 
 
 ## Authentication
 
-Sign-in is required to use the dashboard — see [`specs/auth-roles/spec.md`](specs/auth-roles/spec.md) for the full design. Summary:
+Signing in is required to see anything. Accounts are email + password, handled by
+[Convex Auth](https://labs.convex.dev/auth) — no external identity provider or extra
+signup needed. Set it up once per deployment with `npx @convex-dev/auth` (Quickstart step 3).
 
-- **Provider:** [Convex Auth](https://labs.convex.dev/auth) with the Password provider (email + password, no external identity provider account needed). Set up once per deployment via `npx @convex-dev/auth` — see the Quickstart/Docker deployment steps above.
-- **Roles:** `viewer`, `operator`, `maintenance`, `admin` (parent spec [`specs/foundation/spec.md`](specs/foundation/spec.md) §4). Only `admin` can register/edit/deactivate devices or manage user roles; all four roles can view the live device/telemetry dashboard. Every check is enforced server-side (`backend/lib/auth.ts`) — the client-side gating in `frontend/app/page.tsx` only hides UI, it never substitutes for the real check.
-- **Bootstrap rule:** on a fresh deployment there's no admin yet to promote anyone, so the **first account ever created is automatically made `admin`**. This only ever fires once, while the `users` table is empty — every account after that defaults to `viewer` until an admin promotes it. Not a security hole, just how the very first admin gets created; see spec §5 for the detailed rationale.
-- **Tests:** `npm test` (Vitest + `convex-test`) exercises every Role Matrix cell (allow + deny), the bootstrap rule, `setRole` authorization, and that all denial reasons (unauthenticated, wrong role, deactivated account) produce the same error rather than leaking which one applies.
+### Who can do what
+
+| | Viewer | Operator | Maintenance | Admin |
+|---|:---:|:---:|:---:|:---:|
+| View devices & live telemetry | ✅ | ✅ | ✅ | ✅ |
+| Register / edit / deactivate a device | ❌ | ❌ | ❌ | ✅ |
+| List users, change someone's role | ❌ | ❌ | ❌ | ✅ |
+
+Roles come from [`specs/foundation/spec.md`](specs/foundation/spec.md) §4. Alert
+acknowledgement (operator) and historical export (maintenance) are listed there too,
+but those features don't exist yet — so today only the admin column is actually
+distinguishable from viewer.
+
+### How the first admin happens
+
+A fresh deployment has no admin to promote anyone, so **the first account created
+becomes the admin**. Every account after that starts as `viewer`, and an admin
+promotes them from there.
+
+> ⚠️ This means that on a deployment reachable by anyone, whoever signs up first gets
+> admin. Fine for local dev; **not** something to expose to a network as-is. Sign up
+> immediately after deploying, before anyone else can.
+
+### Where it's enforced
+
+Every role check runs **on the server**, in `backend/lib/auth.ts`, on every protected
+query and mutation. The UI gating in `frontend/app/page.tsx` only hides buttons — it
+is not a security boundary, and calling the backend directly still gets refused.
+
+All denials (not signed in, wrong role, deactivated account) return the same generic
+`Not authorized` error, so a refused request never reveals whether the thing you asked
+for exists.
+
+### Tests
+
+`npm test` (Vitest + [`convex-test`](https://docs.convex.dev/testing/convex-test))
+covers every cell of the table above — allow *and* deny — plus the first-admin rule,
+`setRole` authorization, and the identical-error behavior.
+
+### Known gaps
+
+This feature is implemented but **hasn't passed SDD review yet**. Known divergences
+from [`specs/auth-roles/plan.md`](specs/auth-roles/plan.md):
+
+- First-admin uses "first account wins" instead of the planned `INITIAL_ADMIN_EMAILS`
+  allowlist (the warning above is exactly why the plan chose the allowlist).
+- Sign-up is open to anyone; the plan calls for admin-invite-only provisioning.
+- Route protection is client-side only — the plan calls for Next.js middleware, so a
+  signed-out visitor currently loads the page shell before being shown the sign-in form.
+- Never run against a live Convex deployment — verified by typecheck and tests only.
+
+Tracked in [`specs/auth-roles/tasks.md`](specs/auth-roles/tasks.md).
 
 ## Environment variables
 
