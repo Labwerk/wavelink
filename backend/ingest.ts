@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { mutation } from "./_generated/server";
+import { internalMutation } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 
 const reading = v.object({
@@ -9,9 +9,11 @@ const reading = v.object({
   value: v.union(v.number(), v.string()),
 });
 
-// Entry point for the gateway/simulator service. Not end-user auth'd —
-// secured by a shared ingestion token checked at the HTTP layer (M5).
-export const recordBatch = mutation({
+// Entry point for the gateway/simulator service (spec R12). INTERNAL: not
+// callable by any client. The only way in is `POST /ingest/telemetry`
+// (http.ts), which requires the INGEST_SERVICE_TOKEN service credential -
+// a user session cannot substitute for it.
+export const recordBatch = internalMutation({
   args: { readings: v.array(reading) },
   handler: async (ctx, { readings }) => {
     const deviceCache = new Map<string, Id<"devices">>();

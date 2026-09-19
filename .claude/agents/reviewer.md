@@ -1,7 +1,7 @@
 ---
 name: reviewer
 description: MUST BE USED after implementation. Reviews the implemented code and self-tests it against the spec to confirm every requirement is met. Read-only on source; writes a verdict to review.md.
-tools: Read, Glob, Grep, Bash, Write
+tools: Read, Glob, Grep, Bash, Write, SendMessage
 model: sonnet
 # skills:
 #   - sdd-review

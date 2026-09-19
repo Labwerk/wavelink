@@ -1,15 +1,16 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
-import { requireAuthenticatedUser, requireRole } from "./lib/auth";
+import { recordAudit } from "./lib/audit";
+import { authedMutation, authedQuery } from "./lib/functions";
 
-// Role matrix (spec `specs/auth-roles/spec.md` §4): reads are open to any
-// authenticated, active user (all four roles); register/update/deactivate
-// are admin-only (R9).
+// Role matrix (spec `specs/auth-roles/spec.md` "Users & roles"): reads need
+// `data.read` (all four roles); register/update/deactivate need
+// `device.manage` (admin). Every write appends an audit row in the same
+// mutation (R11).
 
-export const listActive = query({
+export const listActive = authedQuery({
+  capability: "data.read",
   args: {},
   handler: async (ctx) => {
-    await requireAuthenticatedUser(ctx);
     return ctx.db
       .query("devices")
       .withIndex("by_zone_and_status")
@@ -18,15 +19,16 @@ export const listActive = query({
   },
 });
 
-export const get = query({
+export const get = authedQuery({
+  capability: "data.read",
   args: { deviceId: v.id("devices") },
   handler: async (ctx, { deviceId }) => {
-    await requireAuthenticatedUser(ctx);
     return ctx.db.get(deviceId);
   },
 });
 
-export const register = mutation({
+export const register = authedMutation({
+  capability: "device.manage",
   args: {
     externalId: v.string(),
     name: v.string(),
@@ -35,7 +37,6 @@ export const register = mutation({
     metadata: v.optional(v.record(v.string(), v.string())),
   },
   handler: async (ctx, args) => {
-    await requireRole(ctx, ["admin"]);
     const existing = await ctx.db
       .query("devices")
       .withIndex("by_externalId", (q) => q.eq("externalId", args.externalId))
@@ -43,15 +44,24 @@ export const register = mutation({
     if (existing) {
       throw new Error(`Device with externalId ${args.externalId} already exists`);
     }
-    return ctx.db.insert("devices", {
+    const deviceId = await ctx.db.insert("devices", {
       ...args,
       status: "unknown",
       isActive: true,
     });
+    await recordAudit(ctx, {
+      actorId: ctx.user._id,
+      action: "device.register",
+      targetTable: "devices",
+      targetId: deviceId,
+      details: { externalId: args.externalId },
+    });
+    return deviceId;
   },
 });
 
-export const update = mutation({
+export const update = authedMutation({
+  capability: "device.manage",
   args: {
     deviceId: v.id("devices"),
     name: v.optional(v.string()),
@@ -59,15 +69,26 @@ export const update = mutation({
     metadata: v.optional(v.record(v.string(), v.string())),
   },
   handler: async (ctx, { deviceId, ...patch }) => {
-    await requireRole(ctx, ["admin"]);
     await ctx.db.patch(deviceId, patch);
+    await recordAudit(ctx, {
+      actorId: ctx.user._id,
+      action: "device.update",
+      targetTable: "devices",
+      targetId: deviceId,
+    });
   },
 });
 
-export const deactivate = mutation({
+export const deactivate = authedMutation({
+  capability: "device.manage",
   args: { deviceId: v.id("devices") },
   handler: async (ctx, { deviceId }) => {
-    await requireRole(ctx, ["admin"]);
     await ctx.db.patch(deviceId, { isActive: false });
+    await recordAudit(ctx, {
+      actorId: ctx.user._id,
+      action: "device.deactivate",
+      targetTable: "devices",
+      targetId: deviceId,
+    });
   },
 });

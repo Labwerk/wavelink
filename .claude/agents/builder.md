@@ -1,7 +1,7 @@
 ---
 name: builder
 description: MUST BE USED after a plan exists. Breaks the plan into ordered tasks, then implements them with tests, one task at a time. Handles both task decomposition and coding.
-tools: Read, Write, Edit, Glob, Grep, Bash
+tools: Read, Write, Edit, Glob, Grep, Bash, SendMessage
 model: sonnet
 # skills:
 #   - sdd-tasks
