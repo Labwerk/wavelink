@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { query } from "./_generated/server";
+import { latestByMetric } from "./lib/latestMetrics";
 
 export const latestForDevice = query({
   args: { deviceId: v.id("devices") },
@@ -10,14 +11,11 @@ export const latestForDevice = query({
       .order("desc")
       .take(200);
 
-    // Reduce to the latest reading per metric.
-    const latestByMetric = new Map<string, (typeof rows)[number]>();
-    for (const row of rows) {
-      if (!latestByMetric.has(row.metric)) {
-        latestByMetric.set(row.metric, row);
-      }
-    }
-    return Array.from(latestByMetric.values());
+    // Reduce to the latest reading per metric (shared with backend/liveView.ts
+    // via backend/lib/latestMetrics.ts — see that module for why this stays a
+    // bounded scan here instead of the exact-take(1)-per-metric read liveView
+    // uses: this function doesn't know the metric set ahead of time).
+    return latestByMetric(rows);
   },
 });
 
