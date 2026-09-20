@@ -1,7 +1,7 @@
 ---
 name: builder
 description: MUST BE USED after a plan exists. Breaks the plan into ordered tasks, then implements them with tests, one task at a time. Handles both task decomposition and coding.
-tools: Read, Write, Edit, Glob, Grep, Bash
+tools: Read, Write, Edit, Glob, Grep, Bash, SendMessage
 model: sonnet
 # skills:
 #   - sdd-tasks
@@ -30,7 +30,7 @@ For each task in `tasks.md`, in order:
 2. Write or update tests for it.
 3. Run the tests (and linter/formatter if the repo has them) via Bash.
 4. Only when they pass, mark the task done in `tasks.md` (`- [x]`).
-5. If a task conflicts with the spec or plan, STOP and report — do not guess or silently deviate.
+5. If you implement something differently from what plan.md says, add it to tasks.md's "Deviations from plan" section *in the same commit/turn* you make the change — before moving to the next task. A deviation nobody recorded is the same failure as no plan at all.
 
 ## Hard rules
 - Follow existing code style, structure and naming in the repo. Match, don't reinvent.

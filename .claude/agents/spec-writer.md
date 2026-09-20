@@ -1,7 +1,7 @@
 ---
 name: spec-writer
 description: MUST BE USED to turn a raw feature idea into a formal specification. Captures WHAT and WHY only — no technology choices, no implementation, no code. Invoke at the start of any new feature.
-tools: Read, Write, Edit, Glob, Grep
+tools: Read, Write, Edit, Glob, Grep, SendMessage
 model: opus
 # skills:              # optional: attach a reusable spec skill here if you build one
 #   - sdd-spec
