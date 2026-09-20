@@ -9,13 +9,19 @@
     "dev": "concurrently -k -n backend,frontend -c blue,green \"npm run dev:backend\" \"npm run dev:frontend\"",
     "dev:backend": "convex dev",
     "dev:frontend": "npm run dev --workspace=frontend",
-    "dev:simulator": "npm run dev --workspace=gateway/simulator"
+    "dev:simulator": "npm run dev --workspace=gateway/simulator",
+    "test": "vitest run"
   },
   "dependencies": {
+    "@auth/core": "^0.41.3",
+    "@convex-dev/auth": "0.0.95",
     "convex": "^1.17.0"
   },
   "devDependencies": {
+    "@edge-runtime/vm": "^5.0.0",
     "concurrently": "^8.2.2",
-    "typescript": "^5.5.0"
+    "convex-test": "^0.0.59",
+    "typescript": "^5.5.0",
+    "vitest": "^3.2.7"
   }
 }
