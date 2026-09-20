@@ -4,93 +4,98 @@
 
 ## Verdict
 
-**PASS WITH ISSUES**
+**PASS**
 
 All 27 requirements are addressed with concrete, traceable evidence (code + passing
 unit tests + a clean real typecheck against generated Convex types). No requirement
 is silently unmet. The rate-limiter deviation (hand-rolled token bucket instead of
 `@convex-dev/rate-limiter`) is the plan's own named, documented fallback for a
-genuine environment block (GHCR pull denied by sandbox network policy), not an
-invented shortcut, and it satisfies R21–R24 on its own merits. The issues below are
-real but none rise to Blocking: one is a latent error-handling gap that could
-degrade response fidelity under load (Should-fix), the rest are small edge cases or
-documentation/process nits (Nice-to-have), plus the standing, environment-forced
-absence of any live/integration test, which this review treats as a Should-fix note
-per the reviewing brief rather than an automatic fail.
+genuine environment block (GHCR blob pulls denied by sandbox network policy), not
+an invented shortcut, and it satisfies R21–R24 on its own merits.
+
+This is round 2. The one Should-fix and three Nice-to-haves from round 1 have all
+been verified fixed in code, by re-reading the changed files and by independently
+re-running the test suite and both typechecks (not by trusting the builder's
+summary). No new defects were found. What remains open is not a code defect: the
+standing, environment-forced absence of any live/integration test, and one
+plan-level tradeoff (R7) that was reviewed and deliberately left as-is in round 1 —
+both are documented below under Issues/Not covered for transparency, consistent
+with this review's brief that they should not block a PASS.
 
 ## Requirement coverage
 
 | Req | Status | Evidence |
 |---|---|---|
-| R1 | Met | `backend/http.ts:8-16` routes `POST /ingest/readings` to `backend/ingestHttp.ts:37` (`httpAction`). Typechecked clean against real `httpRouter`/`RouteSpec` types (`npx tsc --noEmit -p backend`, verified by reviewer). |
-| R2 | Met | `backend/ingestHttp.ts:43-58`: missing/malformed/unmatched credential → 401 before any `runMutation`. Unit-tested: `backend/lib/ingestAuth.test.ts:69-77`. |
-| R3 | Met (caveat) | `backend/ingestAuth.ts` never touches `ctx.auth`; a Convex-Auth-shaped bearer value never matches (`ingestAuth.test.ts:120-125`). Caveat: the "cannot read telemetry / manage devices" half of R3's acceptance criterion is currently vacuous, because `backend/devices.ts` and `backend/telemetry.ts` have **no auth gating at all yet** (pre-`auth-roles`) — see "Not covered" below. This is the spec's own acknowledged dependency ordering, not a builder defect. |
-| R4 | Met | `backend/ingest.ts:49` — `recordBatch` is an `internalMutation`. Repo-wide grep confirms no other public `mutation`/`query` writes to `telemetry` (`backend/telemetry.ts` only exports a `query`; `backend/devices.ts` never touches the `telemetry` table). |
+| R1 | Met | `backend/http.ts:8-16` routes `POST /ingest/readings` to `backend/ingestHttp.ts:67` (`httpAction`). Typechecked clean against real `httpRouter`/`RouteSpec` types (`npx tsc --noEmit -p backend`, re-verified by reviewer this round). |
+| R2 | Met | `backend/ingestHttp.ts:73-88`: missing/malformed/unmatched credential → 401 before any `runMutation`. Unit-tested: `backend/lib/ingestAuth.test.ts:69-77`. |
+| R3 | Met (caveat) | `backend/ingestAuth.ts` never touches `ctx.auth`; a Convex-Auth-shaped bearer value never matches (`ingestAuth.test.ts:120-125`). Caveat unchanged from round 1: the "cannot read telemetry / manage devices" half of R3's acceptance criterion is currently vacuous, because `backend/devices.ts` and `backend/telemetry.ts` have **no auth gating at all yet** (pre-`auth-roles`) — see "Not covered" below. Spec's own acknowledged dependency ordering, not a builder defect. |
+| R4 | Met | `backend/ingest.ts:49` — `recordBatch` is an `internalMutation`. Repo-wide grep confirms no other public `mutation`/`query` writes to `telemetry`. |
 | R5 | Met | `backend/lib/ingestAuth.ts:100-104` (zero configured entries ⇒ always refuse, still runs a dummy compare). Unit-tested: `ingestAuth.test.ts:79-83`. `.env.example:24-31` documents "unset/empty ⇒ refuse all", no real token committed. |
-| R6 | Met | `parseIngestTokens` (`ingestAuth.ts:33-45`) treats two entries sharing a `sourceId` as both valid. Unit-tested: `ingestAuth.test.ts:85-108` (overlap + immediate retirement, no gap). README §"Credential setup and rotation" documents the `npx convex env set` rotation sequence matching this exactly. |
-| R7 | Met | Byte-identical 401 body (`ingestHttp.ts:18`, `UNAUTHORIZED_BODY`); constant-time compare with no early exit and a dummy compare on zero matches (`ingestAuth.ts:62-104`), unit-tested for no-short-circuit at `ingestAuth.test.ts:49-62`. Each failure is recorded via a structured `console.warn` (`ingestHttp.ts:49-56`, includes ts/user-agent/forwarded-for) plus an `ingestStats.requestsCredentialFailed` counter — a deliberate, plan-documented tradeoff (a DB row per credential failure would be an unauthenticated write-amplification vector) rather than a per-attempt DB row. See Issues (Nice-to-have) for a note on this tradeoff's limits. |
-| R8 | Met | `backend/lib/ingestValidation.ts:42-76` (required/unexpected-field/type checks). Unit-tested per reason code, e.g. `ingestValidation.test.ts:19-40+` (one case per code, confirmed 26/26 passing in that file). |
-| R9 | Met | `ingestValidation.ts:94-100` (future-skew / backfill-age bounds, inclusive-boundary semantics verified by reading: `>`/`<` not `>=`/`<=`, so a reading exactly at the bound is accepted). |
-| R10 | Met | `ingestValidation.ts:77-92` (length bounds on externalId/metric/string value; `Number.isFinite` on numeric value). |
-| R11 | Met | `backend/ingest.ts:102-114`: cache-miss on `by_externalId` ⇒ `unknown_device`; no `ctx.db.insert("devices", ...)` exists anywhere on the ingestion path (confirmed by grep — only `backend/devices.ts:register` inserts devices, and it is never called from `ingest.ts`). |
-| R12 | Met | `ingest.ts:115-118`: `!device.isActive` ⇒ `inactive_device`, checked strictly after the existence check so the two reasons can never be conflated. |
-| R13 | Met | `ingest.ts:69-87` (`reject()` inserts one `ingestRejections` row per rejection, every call site); invariant assertion at `ingest.ts:133-137` throws if `stored + rejected.length !== submitted` (fails safe — the whole transaction rolls back rather than silently under/over-counting). |
-| R14 | Met | `ingest.ts:89-130`: the loop `continue`s past a rejection without aborting the batch; accepted readings for unrelated devices are inserted in the same transaction. |
-| R15 | Met | `ingestHttp.ts:140-149` response includes `submitted`, `stored`, `rejected[]`; each rejection entry (`ingest.ts:81-86`) carries `index`, `reason`, `externalId?`, `metric?` — no prose parsing needed. |
-| R16 | Met | `ingestHttp.ts`: `unauthorized` (401, L57), `malformed_payload` (400, L85/93), `batch_too_large`/`payload_too_large` (413, L77/99), `rate_limited` (429, L69/110), `internal_error` (500, L124) — every category except `internal_error` returns strictly before `ctx.runMutation(internal.ingest.recordBatch, ...)` is ever called (L119), so no partial write is possible; `internal_error` is only reached if `recordBatch`'s own transaction throws, which rolls back entirely. |
-| R17 | Met | `backend/ingest.ts`'s `recordBatch` is one `internalMutation` — Convex commits all its writes as a single transaction — and `ingestHttp.ts:119` `await`s that mutation before building the 200 response (L140-149). See Issues (Should-fix) for a related but distinct fragility in the *post*-write stats-recording step. |
-| R18 | Met | `ingestHttp.ts:73-78` (payload bytes vs `maxPayloadBytes` ⇒ 413 `payload_too_large`) and `L96-100` (`readings.length` vs `maxReadingsPerBatch` ⇒ 413 `batch_too_large`), both before parsing/mutation. |
-| R19 | Met | `ingest.ts:139-151` + `backend/lib/ingestValidation.ts:105-133` (`computeFreshnessPatches`): only `acceptedForFreshness` entries contribute; exactly one `ctx.db.patch` per device with an actual advance. Unit-tested: `ingestValidation.test.ts` freshness cases ("all readings rejected gets no patch", "exactly one patch to the max"). |
-| R20 | Met | `computeFreshnessPatches` (`ingestValidation.ts:126-131`): `if (maxTs > current)` — strictly greater, so an equal or older accepted reading never advances `lastSeenAt`. Unit-tested: "an older accepted reading than current lastSeenAt gets no patch (R20)". |
-| R21 | Met | `backend/lib/ingestRateLimit.ts` (`applyTokenBucket`) + `ingestHttp.ts:62-70` (requests) and `L103-111` (readings), both keyed and both with `capacity` = configured burst. Unit-tested: `ingestRateLimit.test.ts:56-83` (burst passes, sustained excess throttled). |
-| R22 | Met | `ingestHttp.ts:69,110` → `errorResponse(429, "rate_limited", retryAfterMs)`; `errorResponse` (`L27-35`) sets both the JSON body's `retryAfterMs` and an HTTP `Retry-After` header. Distinct status/category from `unauthorized`/`malformed_payload`. See Issues (Nice-to-have) for a `rate: 0` edge case. |
-| R23 | Met | Both buckets keyed by `` `ingestRequests:${sourceId}` ``/`` `ingestReadings:${sourceId}` `` (`ingestHttp.ts:63,104`). Unit-tested: `ingestRateLimit.test.ts:85-94` ("two independent buckets... don't affect each other"). |
-| R24 | Met | `backend/lib/ingestConfig.ts` reads every limit from `process.env` with defaults in `INGEST_CONFIG_DEFAULTS`. Reviewer independently diffed README's "Tunable limits" table (`README.md:298-313`) and `.env.example:40-53` against `INGEST_CONFIG_DEFAULTS` (`ingestConfig.ts:33-48`) — all 14 values match exactly. |
-| R25 | Met | `backend/ingestStats.ts`: `record` (per-batch counter upsert), `summary` (range aggregation), documented CLI invocation in README ("Observability" section). See Issues (Should-fix) for a fragility that could undercount under contention. |
-| R26 | Met | `gateway/simulator/src/index.ts`: bearer auth (`L121-128`), chunking to `WAVELINK_MAX_BATCH` (`L79-86,182`), exponential backoff with jitter honoring `retryAfterMs`/`Retry-After` (`L154-160,190,201`), logs every `rejected[]` entry (`L144-150`), never exits on 401/429/5xx/network error (`L129-177`). Typechecks clean (`npx tsc --noEmit -p gateway/simulator`, verified by reviewer). Not live-tested (see Test results). |
-| R27 | Met | `README.md`'s "Ingestion" section (endpoint, request/response shapes, reason-code table, credential setup/rotation, tunable-limits table) plus `docker-compose.yml`'s `push` service wiring `INGEST_TOKENS` via `npx convex env set` and the `simulator` service's `WAVELINK_INGEST_*` env vars. Reviewer read the full section; no undocumented step was found. |
+| R6 | Met | `parseIngestTokens` (`ingestAuth.ts:33-45`) treats two entries sharing a `sourceId` as both valid. Unit-tested: `ingestAuth.test.ts:85-108` (overlap + immediate retirement, no gap). README §"Credential setup and rotation" matches. |
+| R7 | Met | Byte-identical 401 body (`ingestHttp.ts:20`, `UNAUTHORIZED_BODY`); constant-time compare with no early exit and a dummy compare on zero matches (`ingestAuth.ts:62-104`), unit-tested for no-short-circuit at `ingestAuth.test.ts:49-62`. Each failure recorded via structured `console.warn` (`ingestHttp.ts:79-86`) plus an `ingestStats.requestsCredentialFailed` counter — the plan's deliberate, documented tradeoff (log+counter, not a per-attempt DB row), left as-is per round 1's note that it's a plan-level decision. |
+| R8 | Met | `backend/lib/ingestValidation.ts:42-76` (required/unexpected-field/type checks). Unit-tested per reason code in `ingestValidation.test.ts`. |
+| R9 | Met | `ingestValidation.ts:94-100` (future-skew / backfill-age bounds, strict `>`/`<` so a boundary value is accepted). |
+| R10 | Met | `ingestValidation.ts:77-92` (length bounds; `Number.isFinite` on numeric value). |
+| R11 | Met | `backend/ingest.ts:102-114`: cache-miss on `by_externalId` ⇒ `unknown_device`; no `ctx.db.insert("devices", ...)` anywhere on the ingestion path. |
+| R12 | Met | `ingest.ts:115-118`: `!device.isActive` ⇒ `inactive_device`, checked strictly after the existence check. |
+| R13 | Met | `ingest.ts:69-87` (`reject()` inserts one `ingestRejections` row per rejection); invariant assertion at `ingest.ts:133-137` throws (rolling back the transaction) if `stored + rejected.length !== submitted`. |
+| R14 | Met | `ingest.ts:89-130`: the loop `continue`s past a rejection without aborting the batch; accepted readings for unrelated devices commit in the same transaction. |
+| R15 | Met | `ingestHttp.ts:174-183` response includes `submitted`/`stored`/`rejected[]`; each rejection entry (`ingest.ts:81-86`) carries `index`, `reason`, `externalId?`, `metric?`. |
+| R16 | Met | `ingestHttp.ts`: `unauthorized` (401), `malformed_payload` (400, now also covers empty `readings: []` — see round-2 fix below), `batch_too_large`/`payload_too_large` (413), `rate_limited` (429), `internal_error` (500) — every category except `internal_error` returns strictly before `ctx.runMutation(internal.ingest.recordBatch, ...)` (L153) is ever called. |
+| R17 | Met | `backend/ingest.ts`'s `recordBatch` is one `internalMutation` (atomic commit); `ingestHttp.ts:153` `await`s it before building the 200 response. Round 1's related fragility (a stats-write failure after this point corrupting the reported outcome) is now fixed — see Issues, "Resolved this round". |
+| R18 | Met | `ingestHttp.ts:102-108` (payload bytes) and `L130-134` (`readings.length` vs max), both before parsing/mutation. |
+| R19 | Met | `ingest.ts:139-151` + `backend/lib/ingestValidation.ts:105-133` (`computeFreshnessPatches`): only accepted readings contribute; exactly one patch per device with an actual advance. Unit-tested. |
+| R20 | Met | `computeFreshnessPatches` (`ingestValidation.ts:126-131`): strict `maxTs > current`. Unit-tested ("an older accepted reading... gets no patch (R20)"). |
+| R21 | Met | `backend/lib/ingestRateLimit.ts` (`applyTokenBucket`) + `ingestHttp.ts:92-100` (requests) and `L137-145` (readings), both keyed, `capacity` = configured burst. Unit-tested: `ingestRateLimit.test.ts:56-83`. |
+| R22 | Met | `ingestHttp.ts:99,144` → `errorResponse(429, "rate_limited", retryAfterMs)`; `errorResponse` (`L29-42`) now clamps via `clampRetryAfterMs` before setting the body/header — see Issues, "Resolved this round" (was a Nice-to-have edge case in round 1). |
+| R23 | Met | Both buckets keyed by `` `ingestRequests:${sourceId}` ``/`` `ingestReadings:${sourceId}` `` (`ingestHttp.ts:93,138`). Unit-tested: `ingestRateLimit.test.ts:116-125`. |
+| R24 | Met | `backend/lib/ingestConfig.ts` reads every limit from `process.env` with defaults in `INGEST_CONFIG_DEFAULTS`. README's "Tunable limits" table and `.env.example` independently re-diffed against `INGEST_CONFIG_DEFAULTS` this round — all 14 values still match exactly. |
+| R25 | Met | `backend/ingestStats.ts`: `record`, `summary`, documented CLI invocation in README. Round 1's fragility (an unguarded `record` call able to override the primary response) is now fixed via `recordStatsBestEffort` — see Issues, "Resolved this round". |
+| R26 | Met | `gateway/simulator/src/index.ts`: bearer auth, chunking to `WAVELINK_MAX_BATCH`, exponential backoff with jitter honoring `retryAfterMs`/`Retry-After`, logs every `rejected[]` entry, never exits on 401/429/5xx/network error. Typechecks clean (re-verified this round). Not live-tested (see Test results). |
+| R27 | Met | `README.md`'s "Ingestion" section, `docker-compose.yml`'s `push` service wiring `INGEST_TOKENS`, and the `simulator` service's `WAVELINK_INGEST_*` env vars. No undocumented step found. |
 
 ## Test results
 
-**Ran and confirmed personally (not just trusting the builder's numbers):**
-- `npm test` (`node --test` over `backend/lib/*.test.ts`) → **55/55 pass**, exit 0.
-- `npx tsc --noEmit -p backend` → clean (exit 0), against the real generated
-  `backend/_generated/{server,dataModel,api}` produced offline by
-  `npx convex codegen --system-udfs --init` (confirmed this codegen path works with
-  no network/deployment access, as the builder claimed).
+**Ran and confirmed personally this round (not just trusting the builder's numbers):**
+- `npm test` (`node --test` over `backend/lib/*.test.ts`) → **59/59 pass**, exit 0
+  (was 55/55 in round 1; the 4 new cases are the `retryAfter`/`clampRetryAfterMs`
+  cases in `backend/lib/ingestRateLimit.test.ts:90-114`, read and confirmed to
+  actually exercise the `Infinity`/`NaN`/`-Infinity` clamp and its
+  JSON/header-safety, not just the happy path).
+- `npx tsc --noEmit -p backend` → clean (exit 0).
 - `npx tsc --noEmit -p gateway/simulator` → clean (exit 0).
-- Read `.env.example`, `README.md`'s Ingestion section, and `docker-compose.yml` in
-  full and cross-checked the documented defaults against
-  `INGEST_CONFIG_DEFAULTS` in `backend/lib/ingestConfig.ts` — all 14 tunables match
-  exactly, confirming the builder's "diffed programmatically" claim.
-- Confirmed no lint script exists anywhere in the repo (`package.json`,
-  `frontend/package.json`, `gateway/simulator/package.json`) — this predates the
-  feature; nothing to run.
+- Re-read `backend/ingestHttp.ts` end to end and counted call sites: all 8
+  `internal.ingestStats.record` invocations now go through the new
+  `recordStatsBestEffort` helper (`ingestHttp.ts:54-65`), and exactly one direct
+  `ctx.runMutation(internal.ingestStats.record, ...)` call remains — inside that
+  helper's own `try/catch` (`L59`). No path can leak an unhandled exception from a
+  stats-write failure.
+- Re-read `errorResponse` (`ingestHttp.ts:29-42`) and confirmed both call sites
+  that pass a `retryAfterMs` (`L99`, `L144`) route through it, and it
+  unconditionally clamps via `clampRetryAfterMs` before touching the JSON body or
+  the `Retry-After` header — no way for an unclamped `Infinity` to reach a
+  response.
+- Confirmed the empty-`readings`-array fix (`ingestHttp.ts:121-128`): `readings ===
+  null || readings.length === 0` now both return `malformed_payload`; the old
+  vacuous 200 response is gone.
+- Confirmed `docker-compose.yml:14` now pins
+  `ghcr.io/get-convex/convex-backend@sha256:1b0dcd93a3d126400d16e256aea1106a2ee9538882dda545d2c979f28cff1483`
+  instead of `:latest`, with the resolution method documented in an adjacent
+  comment.
 
-**Not run, and not possible in this environment (confirmed, not assumed):**
+**Not run, and not possible in this environment (unchanged from round 1, confirmed
+again rather than assumed):**
 - Any live/integration test: no HTTP request has ever hit `ingestHttp.ts`, no
   mutation has ever written to a real `telemetry`/`ingestRejections`/`ingestStats`
   table, and `docker compose up` has never been exercised against real containers.
-  This reviewer did not attempt `docker compose pull`/`up` again, since the
-  builder's GHCR policy-denial finding (T2) is credible and re-attempting it would
-  not produce new information.
+  This reviewer did not re-attempt `docker compose pull`/`up` — the builder's GHCR
+  blob-CDN policy-denial finding (T2) is credible, and the fact that the GHCR
+  *manifest* API (used only to resolve the digest) is reachable while the *blob*
+  CDN is not is a plausible, narrower exception, not evidence the original finding
+  was wrong.
 - Whether `@convex-dev/rate-limiter` itself is compatible with the self-hosted
-  backend image remains genuinely unverified (by builder or reviewer) — the
-  hand-rolled fallback is judged on its own merits below, per this review's brief,
-  not penalized for not being the named component.
-
-**Deviation-specific judgment (tasks.md "Deviations from plan"):**
-- The rate-limiter fallback (`backend/lib/ingestRateLimit.ts` + `ingestRateLimits`
-  table) independently satisfies R21–R24: same `{ok, retryAfter}` contract, per-key
-  buckets, burst = capacity, env-configurable, unit-tested including the R23
-  "two sources are independent" case. It does not silently violate any non-goal or
-  requirement — it's the plan's own named contingency, applied because the spike it
-  was contingent on could not be run at all in this sandbox. No objection.
-- The other four recorded deviations (`validateReadingShape` naming, the added
-  `by_minuteStart` index, the `INGEST_REJECTION_MAX_ROWS` exact-enforcement
-  threshold, and `"type": "module"`) are all either purely additive, cosmetic, or
-  transparently reasoned platform limitations — none weakens a requirement or
-  hides a gap. No objection.
+  backend image remains genuinely unverified — the hand-rolled fallback continues
+  to be judged on its own merits, per this review's brief.
 
 ## Issues
 
@@ -98,85 +103,54 @@ per the reviewing brief rather than an automatic fail.
 - None.
 
 **Should-fix**
-- **Unguarded `ingestStats.record` calls can turn a well-defined response into a
-  generic failure (affects R16, R17's response reliability, R22, R25).**
-  `backend/ingestHttp.ts` calls `ctx.runMutation(internal.ingestStats.record, ...)`
-  at **every** exit path (lines 45, 68, 76, 84, 92, 98, 109, 132) with no
-  `try/catch`. If that mutation throws — e.g. under the "counter contention" the
-  plan's own Risks section names as a real possibility (many concurrent batches
-  from the same source hitting the same per-minute `ingestStats` document) — the
-  exception propagates out of the `httpAction` unhandled. Two concrete
-  consequences: (1) on the **accepted** path (line 132), this happens *after*
-  `recordBatch` has already durably committed the readings (line 119) — so a
-  sender could receive a failure/500-ish response for a batch that was, in fact,
-  fully accepted and stored, inviting a retry that compounds the spec's
-  already-accepted "duplicate on retry" risk; (2) on **every** other path (401,
-  429, 413, 400), the carefully-designed, documented `{outcome:"error",
-  category:...}` shape (R16, R22) could be replaced by whatever generic error
-  Convex's own httpAction error handling produces, which does not match the
-  documented contract. Suggest wrapping each `ingestStats.record` call in its own
-  `try/catch`, logging a warning on failure, and always returning the
-  already-determined response regardless of whether the stats write succeeded —
-  stats are explicitly a secondary observability concern (R25) and should never be
-  able to override the primary request outcome the client already earned.
+- None. (Round 1's single Should-fix — unguarded `ingestStats.record` calls able
+  to override the primary response under contention — is resolved; see "Resolved
+  this round" below.)
+
+**Resolved this round (verified, not just trusted):**
+- **Unguarded `ingestStats.record` calls (was Should-fix, R16/R17/R22/R25).** Now
+  routed through `recordStatsBestEffort` (`backend/ingestHttp.ts:54-65`), which
+  `try`/`catch`es the mutation and only logs on failure. Verified all 8 call sites
+  use it and none bypass it.
+- **`retryAfter` could become `Infinity` at `rate: 0` (was Nice-to-have, R22).**
+  `backend/lib/ingestRateLimit.ts:81-85` adds `MAX_RETRY_AFTER_MS` (24h) and
+  `clampRetryAfterMs`; `ingestHttp.ts:37` applies it unconditionally in
+  `errorResponse`. Verified with the new unit tests
+  (`ingestRateLimit.test.ts:90-114`), including a JSON.stringify round-trip
+  assertion that the body no longer serializes to `null`.
+- **Empty `readings: []` batch was silently accepted (was Nice-to-have).** Now
+  rejected as `malformed_payload` (`ingestHttp.ts:121-128`), matching spec.md's
+  Terminology ("one or more readings").
+- **`docker-compose.yml` backend image still `:latest` (was Nice-to-have).** Now
+  pinned to a digest (`docker-compose.yml:14`), matching plan.md's Risks-section
+  suggestion, with the resolution command trail left in a comment for future
+  re-pins.
 
 **Nice-to-have**
-- **`retryAfter` can become `Infinity` if an operator sets a `*_PER_MINUTE` env var
-  to `0`.** `backend/lib/ingestRateLimit.ts:67` — `refillRatePerMs > 0 ? ... :
-  Infinity`. `errorResponse` (`ingestHttp.ts:27-35`) then does
-  `JSON.stringify({..., retryAfterMs: Infinity})`, which serializes to `null`
-  (`JSON.stringify(Infinity) === "null"` in JS), while the `Retry-After` **header**
-  gets the literal string `"Infinity"` — not a valid HTTP header value, and
-  inconsistent with the (silently dropped) body field. Low priority (setting a
-  rate to exactly 0 is an unusual way to hard-disable a source), but worth
-  clamping — e.g. `Number.isFinite(retryAfter) ? retryAfter : someMaxMs` — before
-  building the response.
-- **An empty `readings: []` batch is accepted** (`ingestHttp.ts` never rejects a
-  zero-length array; `ingest.ts` happily returns `{submitted:0, stored:0,
-  rejected:[]}` with a 200). Spec's Terminology defines a Batch as "one ingestion
-  request carrying **one or more** readings," so this is a minor mismatch with the
-  glossary, though no numbered requirement explicitly forbids an empty batch and
-  no harm results. Consider rejecting with a `malformed_payload`/dedicated reason
-  if strict terminology conformance matters later.
-- **`docker-compose.yml`'s backend image is still `:latest`**
-  (`ghcr.io/get-convex/convex-backend:latest`, line 3), despite plan.md's Risks
-  section explicitly suggesting "pin the backend image to a digest while you're in
-  there — `latest` is not reproducible." This wasn't done and wasn't recorded in
-  tasks.md's Deviations. It's a soft suggestion rather than one of spec.md's R1–R27
-  or one of plan's four "please confirm" points, so not required for this review's
-  pass/fail, but worth a follow-up task.
-- **R7's "recorded" is a log line + counter, not a queryable per-attempt row** —
-  this is the plan's own explicitly-reasoned tradeoff (Tech decisions table +
-  Risks section), adopted to avoid handing an unauthenticated flood a write
-  amplifier. Judged Met on its own terms here, but plan.md itself flags that if a
-  future reviewer or stakeholder insists R7 means an auditable per-failure
-  database row, that's a plan-level decision to revisit with the planner, not a
-  builder defect to fix unilaterally.
+- **R7's "recorded" remains a log line + counter, not a queryable per-attempt
+  row.** Confirmed deliberately left as-is per the coordinator's note and round
+  1's own conclusion that this is the plan's documented tradeoff (avoiding an
+  unauthenticated write-amplification vector), not a builder gap. No action
+  needed from the builder; flagged only in case a future stakeholder wants an
+  auditable per-failure row, which would be a planner-level conversation.
 
 ## Not covered
 
-- **R3's "cannot read telemetry / manage devices / manage users" half** has no
-  meaningful test today because `backend/devices.ts` and `backend/telemetry.ts`
-  carry **zero** auth gating yet (confirmed by reading both files — no
-  `ctx.auth`/`requireRole` check anywhere): every query and mutation there is
-  already fully public today, credentialed or not, so the ingestion credential
-  isn't being "refused" from anything — there's no gate yet to refuse it from.
-  This is squarely the spec's own acknowledged dependency ordering
-  ("This feature must not require end-user auth to be finished first"), not a
-  builder gap, but it means this half of R3 needs to be re-verified once
-  `auth-roles` actually lands its `requireAuth`/`requireRole` checks — flag it for
-  that feature's reviewer rather than closing the loop here.
-- **All end-to-end/integration behavior** (a real HTTP POST actually reaching
+- **R3's "cannot read telemetry / manage devices / manage users" half** still has
+  no meaningful test, because `backend/devices.ts` and `backend/telemetry.ts`
+  carry zero auth gating yet (confirmed again this round). This is the spec's own
+  acknowledged dependency ordering ("must not require end-user auth to be
+  finished first"), not a builder gap — re-verify once `auth-roles` lands its
+  `requireAuth`/`requireRole` checks.
+- **All end-to-end/integration behavior** (a real HTTP POST reaching
   `ingestHttp.ts`, a real write landing in `telemetry`/`ingestRejections`/
-  `ingestStats`, real cron execution, real credential rotation against a live
-  deployment, real rate-limiter behavior under concurrent load, real
-  `docker compose up`) has never been exercised, in this build or in this review,
-  because both GHCR (self-hosted backend image) and Convex's anonymous dev-mode
-  endpoint are policy-blocked in this sandbox. What stands in for it: pure-logic
-  unit tests (55/55) for every requirement's core logic, plus a real `tsc`
-  typecheck against actually-generated Convex types for every call site
-  (`ctx.db`, `ctx.runMutation`, `internal.*` references, index names, schema
-  shapes). This is a materially weaker guarantee than a live integration test for
-  a security-hardening feature, and should be exercised for real the first time
-  this environment (or any environment) has unblocked registry/deployment access,
-  before this feature is trusted in a real deployment.
+  `ingestStats`, real cron execution, real credential rotation, real rate-limiter
+  behavior under concurrent load, real `docker compose up`) has never been
+  exercised, in this build or in either review pass, because GHCR blob pulls and
+  Convex's anonymous dev-mode endpoint are both policy-blocked in this sandbox.
+  What stands in for it: 59/59 passing pure-logic unit tests covering every
+  requirement's core logic, plus a real `tsc` typecheck against actually-generated
+  Convex types for every call site. This is a materially weaker guarantee than a
+  live integration test for a security-hardening feature and should be exercised
+  for real the first time an environment with unblocked registry/deployment
+  access is available, before this feature is trusted in a real deployment.
