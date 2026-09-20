@@ -4,7 +4,6 @@
 import { afterEach, describe, expect, test } from "vitest";
 import {
   deviceListPageSize,
-  deviceRegistryRequireAdmin,
   heartbeatWindowMs,
   metadataMaxEntries,
   metadataMaxKeyLength,
@@ -17,7 +16,6 @@ const ENV_KEYS = [
   "DEVICE_METADATA_MAX_KEY_LENGTH",
   "DEVICE_METADATA_MAX_VALUE_LENGTH",
   "DEVICE_LIST_PAGE_SIZE",
-  "DEVICE_REGISTRY_REQUIRE_ADMIN",
 ];
 
 afterEach(() => {
@@ -31,7 +29,6 @@ describe("backend/lib/config (R4)", () => {
     expect(metadataMaxKeyLength()).toBe(64);
     expect(metadataMaxValueLength()).toBe(256);
     expect(deviceListPageSize()).toBe(50);
-    expect(deviceRegistryRequireAdmin()).toBe(false);
   });
 
   test("heartbeat window is overridable without a code change", () => {
@@ -44,14 +41,5 @@ describe("backend/lib/config (R4)", () => {
     expect(heartbeatWindowMs()).toBe(60_000);
     process.env.DEVICE_HEARTBEAT_WINDOW_MS = "";
     expect(heartbeatWindowMs()).toBe(60_000);
-  });
-
-  test("DEVICE_REGISTRY_REQUIRE_ADMIN accepts 'true'/'1'", () => {
-    process.env.DEVICE_REGISTRY_REQUIRE_ADMIN = "true";
-    expect(deviceRegistryRequireAdmin()).toBe(true);
-    process.env.DEVICE_REGISTRY_REQUIRE_ADMIN = "1";
-    expect(deviceRegistryRequireAdmin()).toBe(true);
-    process.env.DEVICE_REGISTRY_REQUIRE_ADMIN = "false";
-    expect(deviceRegistryRequireAdmin()).toBe(false);
   });
 });

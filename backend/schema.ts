@@ -1,7 +1,17 @@
+import { authTables } from "@convex-dev/auth/server";
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { roleValidator } from "./lib/permissions";
 
 export default defineSchema({
+  // Convex Auth's own tables (authSessions, authAccounts, authRefreshTokens,
+  // authVerificationCodes, authVerifiers, authRateLimits). Its default
+  // `users` table is intentionally overridden below with our own shape
+  // (see `specs/auth-roles/plan.md`, Data model): our `createOrUpdateUser`
+  // callback in `backend/auth.ts` owns user-row creation, so none of
+  // Convex Auth's default `users` fields are required.
+  ...authTables,
+
   devices: defineTable({
     externalId: v.string(), // Trimmed, as entered. Displayed. Immutable after registration (R21).
     externalIdKey: v.string(), // externalId.trim().toLowerCase() — the uniqueness key (R20). Never shown.
@@ -73,39 +83,49 @@ export default defineSchema({
     .index("by_device_and_status", ["deviceId", "status"])
     .index("by_status_and_triggeredAt", ["status", "triggeredAt"]),
 
+  // Identity + exactly one role (R2). The row's own `_id` is the identity
+  // (`getAuthUserId`); `role` is written only by the creation callback in
+  // `auth.ts` (via `lib/provisioning.ts`: "viewer", or "admin" on the
+  // self-derived first-admin bootstrap) and by `users.setRole`.
   users: defineTable({
-    authId: v.string(),
-    name: v.string(),
     email: v.string(),
-    role: v.union(
-      v.literal("viewer"),
-      v.literal("operator"),
-      v.literal("maintenance"),
-      v.literal("admin"),
-    ),
+    name: v.string(),
+    role: roleValidator,
     isActive: v.boolean(),
+    // The admin who provisioned this account, validated inside the creation
+    // transaction. Absent for the bootstrap admin.
+    createdBy: v.optional(v.id("users")),
   })
-    .index("by_authId", ["authId"])
+    .index("by_email", ["email"])
     .index("by_role", ["role"]),
 
-  // General audit trail (R29/R30/R31). `entityTable`/`entityId` are generic
-  // (by convention, not a typed reference) so future features — role changes,
-  // alert-rule edits — can reuse this table instead of each growing its own.
+  // General audit trail (R11/R29/R30/R31). Attribution (R11): appended in the
+  // same mutation as every state change. `actorId` is always the
+  // authenticated user who acted, EXCEPT for break-glass operations run with
+  // the deployment admin key (no user), which carry `details.via` instead.
+  // `targetTable`/`targetId` are generic (by convention, not a typed
+  // reference) so any feature can reuse this table. `details` holds simple
+  // key/value context (e.g. a role change's from/to); `changes` holds a
+  // structured per-field before/after diff for edits touching several fields
+  // at once (e.g. a device edit) — see `lib/audit.ts` `diffFields`.
   auditLog: defineTable({
-    entityTable: v.string(),
-    entityId: v.string(),
+    actorId: v.optional(v.id("users")),
     action: v.string(),
-    actorUserId: v.optional(v.id("users")),
-    actorLabel: v.string(),
-    at: v.number(),
-    changes: v.array(
-      v.object({
-        field: v.string(),
-        before: v.optional(v.string()),
-        after: v.optional(v.string()),
-      }),
+    targetTable: v.optional(v.string()),
+    targetId: v.optional(v.string()),
+    details: v.optional(v.record(v.string(), v.string())),
+    changes: v.optional(
+      v.array(
+        v.object({
+          field: v.string(),
+          before: v.optional(v.string()),
+          after: v.optional(v.string()),
+        }),
+      ),
     ),
+    at: v.number(),
   })
-    .index("by_entity", ["entityTable", "entityId", "at"])
-    .index("by_at", ["at"]),
+    .index("by_at", ["at"])
+    .index("by_actor_and_at", ["actorId", "at"])
+    .index("by_target", ["targetTable", "targetId", "at"]),
 });

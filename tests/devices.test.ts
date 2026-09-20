@@ -2,8 +2,9 @@ import { convexTest } from "convex-test";
 import { ConvexError } from "convex/values";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { api, internal } from "../backend/_generated/api";
+import { NOT_AUTHORIZED } from "../backend/lib/auth";
 import schema from "../backend/schema";
-import { ADMIN_GATED_MUTATIONS, createUserFixture, NON_ADMIN_ROLES, type Test } from "./testUtils";
+import { ADMIN_GATED_MUTATIONS, ALL_ROLES, createUserFixture, NON_ADMIN_ROLES, type Test } from "./testUtils";
 
 const modules = import.meta.glob("../backend/**/*.*s");
 
@@ -19,7 +20,6 @@ const ingestSource = (import.meta.glob("../backend/ingest.ts", {
 }) as Record<string, string>)["../backend/ingest.ts"];
 
 afterEach(() => {
-  delete process.env.DEVICE_REGISTRY_REQUIRE_ADMIN;
   delete process.env.DEVICE_HEARTBEAT_WINDOW_MS;
   vi.useRealTimers();
 });
@@ -44,6 +44,45 @@ async function registerDevice(
   });
   return deviceId;
 }
+
+// ---------------------------------------------------------------------------
+// Authentication: R1, R3 (every device function requires a session)
+// ---------------------------------------------------------------------------
+
+describe("device functions require authentication (R1, R3)", () => {
+  test("an unauthenticated caller is denied every read and write", async () => {
+    const t = convexTest(schema, modules);
+    const deviceId = await registerDevice(t);
+
+    await expect(
+      t.query(api.devices.list, { paginationOpts: { numItems: 10, cursor: null } }),
+    ).rejects.toThrow(NOT_AUTHORIZED);
+    await expect(t.query(api.devices.get, { deviceId })).rejects.toThrow(NOT_AUTHORIZED);
+    await expect(t.query(api.devices.facets, {})).rejects.toThrow(NOT_AUTHORIZED);
+    await expect(t.query(api.devices.changeHistory, { deviceId })).rejects.toThrow(NOT_AUTHORIZED);
+    await expect(
+      t.mutation(api.devices.register, { externalId: "no-session", name: "x", type: "agv" }),
+    ).rejects.toThrow(NOT_AUTHORIZED);
+    await expect(t.mutation(api.devices.update, { deviceId, name: "x" })).rejects.toThrow(NOT_AUTHORIZED);
+    await expect(t.mutation(api.devices.decommission, { deviceId })).rejects.toThrow(NOT_AUTHORIZED);
+    await expect(t.mutation(api.devices.reactivate, { deviceId })).rejects.toThrow(NOT_AUTHORIZED);
+  });
+
+  for (const role of ALL_ROLES) {
+    test(`${role} can read list/get/facets (data.read)`, async () => {
+      const t = convexTest(schema, modules);
+      const deviceId = await registerDevice(t);
+      const { as } = await createUserFixture(t, role);
+
+      const list = await as.query(api.devices.list, {
+        paginationOpts: { numItems: 10, cursor: null },
+      });
+      expect(list.page.map((d) => d._id)).toContain(deviceId);
+      expect((await as.query(api.devices.get, { deviceId }))?._id).toBe(deviceId);
+      await expect(as.query(api.devices.facets, {})).resolves.toBeDefined();
+    });
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Registration: R12, R15, R18, R19, R20, R22, R23
@@ -181,7 +220,7 @@ describe("devices.register uniqueness and normalization (R19, R20)", () => {
     const t = convexTest(schema, modules);
     const deviceId = await registerDevice(t, { externalId: "sim-cnc-01" });
 
-    await t.mutation(api.ingest.recordBatch, {
+    await t.mutation(internal.ingest.recordBatch, {
       readings: [{ externalId: "SIM-CNC-01", ts: Date.now(), metric: "temp", value: 42 }],
     });
 
@@ -317,7 +356,7 @@ describe("devices lifecycle (R14, R24, R25, R27, R28)", () => {
       zone: "line-3",
       metadata: { fw: "9.9" },
     });
-    await t.mutation(api.ingest.recordBatch, {
+    await t.mutation(internal.ingest.recordBatch, {
       readings: [{ externalId: "robot-07", ts: Date.now(), metric: "temp", value: 10 }],
     });
 
@@ -367,7 +406,6 @@ describe("devices lifecycle (R14, R24, R25, R27, R28)", () => {
 
   test("includeDecommissioned is admin-only", async () => {
     const t = convexTest(schema, modules);
-    process.env.DEVICE_REGISTRY_REQUIRE_ADMIN = "true";
     const { as: viewer } = await createUserFixture(t, "viewer");
 
     await expect(
@@ -375,7 +413,7 @@ describe("devices lifecycle (R14, R24, R25, R27, R28)", () => {
         paginationOpts: { numItems: 10, cursor: null },
         includeDecommissioned: true,
       }),
-    ).rejects.toThrow(ConvexError);
+    ).rejects.toThrow(NOT_AUTHORIZED);
   });
 
   test("no exposed operation permanently removes a device (R27)", async () => {
@@ -388,7 +426,7 @@ describe("devices lifecycle (R14, R24, R25, R27, R28)", () => {
     const t = convexTest(schema, modules);
     const { as: admin } = await createUserFixture(t, "admin");
     const deviceId = await registerDevice(t, { externalId: "robot-09" });
-    await t.mutation(api.ingest.recordBatch, {
+    await t.mutation(internal.ingest.recordBatch, {
       readings: [{ externalId: "robot-09", ts: Date.now(), metric: "temp", value: 1 }],
     });
     await admin.mutation(api.devices.decommission, { deviceId });
@@ -414,7 +452,7 @@ describe("connectivity state (R1, R2, R3, R5)", () => {
     const offlineId = await registerDevice(t, { externalId: "fx-offline" });
     const unknownId = await registerDevice(t, { externalId: "fx-unknown" });
 
-    await t.mutation(api.ingest.recordBatch, {
+    await t.mutation(internal.ingest.recordBatch, {
       readings: [
         { externalId: "fx-online", ts: Date.now(), metric: "temp", value: 1 },
         { externalId: "fx-offline", ts: Date.now(), metric: "temp", value: 1 },
@@ -425,7 +463,7 @@ describe("connectivity state (R1, R2, R3, R5)", () => {
     vi.advanceTimersByTime(70_000);
     await t.mutation(internal.devices.sweepOffline, {});
     // Refresh the "online" fixture just under the wire so it stays online.
-    await t.mutation(api.ingest.recordBatch, {
+    await t.mutation(internal.ingest.recordBatch, {
       readings: [{ externalId: "fx-online", ts: Date.now(), metric: "temp", value: 2 }],
     });
 
@@ -446,7 +484,7 @@ describe("connectivity state (R1, R2, R3, R5)", () => {
     const { as: admin } = await createUserFixture(t, "admin");
     const deviceId = await registerDevice(t, { externalId: "fx-transition" });
 
-    await t.mutation(api.ingest.recordBatch, {
+    await t.mutation(internal.ingest.recordBatch, {
       readings: [{ externalId: "fx-transition", ts: Date.now(), metric: "temp", value: 1 }],
     });
     expect((await admin.query(api.devices.get, { deviceId }))?.status).toBe("online");
@@ -466,7 +504,7 @@ describe("connectivity state (R1, R2, R3, R5)", () => {
     const { as: admin } = await createUserFixture(t, "admin");
     const deviceId = await registerDevice(t, { externalId: "fx-short-window" });
 
-    await t.mutation(api.ingest.recordBatch, {
+    await t.mutation(internal.ingest.recordBatch, {
       readings: [{ externalId: "fx-short-window", ts: Date.now(), metric: "temp", value: 1 }],
     });
     vi.advanceTimersByTime(6_000);
@@ -480,7 +518,7 @@ describe("connectivity state (R1, R2, R3, R5)", () => {
     const t = convexTest(schema, modules);
     const { as: admin } = await createUserFixture(t, "admin");
     const deviceId = await registerDevice(t, { externalId: "fx-consistent" });
-    await t.mutation(api.ingest.recordBatch, {
+    await t.mutation(internal.ingest.recordBatch, {
       readings: [{ externalId: "fx-consistent", ts: Date.now(), metric: "temp", value: 1 }],
     });
     vi.advanceTimersByTime(61_000);
@@ -542,7 +580,7 @@ describe("filtering and grouping (R7, R8, R9, R10, R11)", () => {
     // Force zoneAndOffline into "offline" via ingest + sweep.
     const device = await admin.query(api.devices.get, { deviceId: zoneAndOffline });
     vi.useFakeTimers();
-    await t.mutation(api.ingest.recordBatch, {
+    await t.mutation(internal.ingest.recordBatch, {
       readings: [{ externalId: device!.externalId, ts: Date.now(), metric: "t", value: 1 }],
     });
     vi.advanceTimersByTime(61_000);
@@ -592,7 +630,7 @@ describe("filtering and grouping (R7, R8, R9, R10, R11)", () => {
     const t = convexTest(schema, modules);
     const { as: admin } = await createUserFixture(t, "admin");
     const deviceId = await registerDevice(t, { externalId: "fx-leaves" });
-    await t.mutation(api.ingest.recordBatch, {
+    await t.mutation(internal.ingest.recordBatch, {
       readings: [{ externalId: "fx-leaves", ts: Date.now(), metric: "t", value: 1 }],
     });
 
@@ -686,19 +724,18 @@ describe("admin gating (R17, R31)", () => {
     { name: "reactivate", call: (t, deviceId) => t.mutation(api.devices.reactivate, { deviceId }) },
   ];
 
-  test("REGISTRY_MUTATIONS matches the ADMIN_GATED_MUTATIONS list tests/deviceApiSurface.test.ts enforces against the source — so this list itself cannot silently drift from what's actually gated", () => {
+  test("REGISTRY_MUTATIONS matches the ADMIN_GATED_MUTATIONS list tests/testUtils.ts declares — so this list itself cannot silently drift from what's actually gated", () => {
     expect(REGISTRY_MUTATIONS.map((op) => op.name).sort()).toEqual([...ADMIN_GATED_MUTATIONS].sort());
   });
 
   test("every registry mutation is refused for every non-admin role and allowed for admin", async () => {
-    process.env.DEVICE_REGISTRY_REQUIRE_ADMIN = "true";
     for (const op of REGISTRY_MUTATIONS) {
       const t = convexTest(schema, modules);
-      const deviceId = await registerDeviceAsRequireAdminAdmin(t);
+      const deviceId = await registerDeviceAsAdmin(t);
 
       for (const role of NON_ADMIN_ROLES) {
         const { as } = await createUserFixture(t, role);
-        await expect(op.call(as, deviceId)).rejects.toThrow(ConvexError);
+        await expect(op.call(as, deviceId)).rejects.toThrow(NOT_AUTHORIZED);
       }
 
       const { as: admin } = await createUserFixture(t, "admin");
@@ -707,30 +744,19 @@ describe("admin gating (R17, R31)", () => {
   });
 
   test("devices.changeHistory is refused for non-admins and succeeds for admin (R31)", async () => {
-    process.env.DEVICE_REGISTRY_REQUIRE_ADMIN = "true";
     const t = convexTest(schema, modules);
-    const deviceId = await registerDeviceAsRequireAdminAdmin(t);
+    const deviceId = await registerDeviceAsAdmin(t);
 
     for (const role of NON_ADMIN_ROLES) {
       const { as } = await createUserFixture(t, role);
-      await expect(as.query(api.devices.changeHistory, { deviceId })).rejects.toThrow(ConvexError);
+      await expect(as.query(api.devices.changeHistory, { deviceId })).rejects.toThrow(NOT_AUTHORIZED);
     }
 
     const { as: admin } = await createUserFixture(t, "admin");
     await expect(admin.query(api.devices.changeHistory, { deviceId })).resolves.toBeDefined();
   });
 
-  test("with the default (permissive) flag, an unauthenticated caller is treated as admin", async () => {
-    const t = convexTest(schema, modules);
-    const deviceId = await t.mutation(api.devices.register, {
-      externalId: "permissive-01",
-      name: "Permissive",
-      type: "agv",
-    });
-    await expect(t.mutation(api.devices.decommission, { deviceId })).resolves.toBeDefined();
-  });
-
-  async function registerDeviceAsRequireAdminAdmin(t: Test): Promise<string> {
+  async function registerDeviceAsAdmin(t: Test): Promise<string> {
     const { as: admin } = await createUserFixture(t, "admin");
     return admin.mutation(api.devices.register, {
       externalId: `gate-seed-${Math.random()}`,
@@ -747,7 +773,7 @@ describe("admin gating (R17, R31)", () => {
 describe("audit trail (R29, R30)", () => {
   test("a successful edit records one entry with the acting admin, both field changes, and old/new values", async () => {
     const t = convexTest(schema, modules);
-    const { as: admin, userId } = await createUserFixtureWithId(t, "admin");
+    const { as: admin, userId } = await createUserFixture(t, "admin");
     const deviceId = await admin.mutation(api.devices.register, {
       externalId: "audit-01",
       name: "Old Name",
@@ -760,7 +786,7 @@ describe("audit trail (R29, R30)", () => {
     const history = await admin.query(api.devices.changeHistory, { deviceId });
     const updateEntry = history.find((h: any) => h.action === "device.update");
     expect(updateEntry).toBeDefined();
-    expect(updateEntry.actorUserId).toBe(userId);
+    expect(updateEntry.actorId).toBe(userId);
     expect(updateEntry.at).toBeTypeOf("number");
     const fields = updateEntry.changes.map((c: any) => c.field).sort();
     expect(fields).toEqual(["name", "zone"]);
@@ -808,9 +834,4 @@ describe("audit trail (R29, R30)", () => {
     const afterHistory = await admin.query(api.devices.changeHistory, { deviceId });
     expect(afterHistory.length).toBe(1); // unchanged — reordering alone is not a change
   });
-
-  async function createUserFixtureWithId(t: Test, role: "admin") {
-    const fixture = await createUserFixture(t, role);
-    return { as: fixture.as, userId: fixture.userId };
-  }
 });

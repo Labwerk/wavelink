@@ -51,6 +51,8 @@ export function DeviceDetail({
   const device = useQuery(api.devices.get, { deviceId });
   const readings = useQuery(api.telemetry.latestForDevice, { deviceId });
   const history = useQuery(api.devices.changeHistory, isAdmin ? { deviceId } : "skip");
+  const users = useQuery(api.users.list, isAdmin ? {} : "skip");
+  const emailById = new Map(users?.map((u) => [u._id, u.email]));
 
   const updateDevice = useMutation(api.devices.update);
   const decommission = useMutation(api.devices.decommission);
@@ -202,10 +204,10 @@ export function DeviceDetail({
                 {history?.map((h) => (
                   <tr key={h._id}>
                     <td>{new Date(h.at).toLocaleString()}</td>
-                    <td>{h.actorLabel}</td>
+                    <td>{h.actorId ? (emailById.get(h.actorId) ?? h.actorId) : "deployment admin key"}</td>
                     <td>{h.action}</td>
                     <td>
-                      {h.changes.length === 0
+                      {!h.changes || h.changes.length === 0
                         ? "—"
                         : h.changes
                             .map((c) => `${c.field}: ${c.before ?? "∅"} → ${c.after ?? "∅"}`)

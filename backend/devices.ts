@@ -2,9 +2,10 @@ import { paginationOptsValidator } from "convex/server";
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
-import { internalMutation, mutation, query, type QueryCtx } from "./_generated/server";
-import { requireAdmin } from "./lib/access";
+import { internalMutation, type QueryCtx } from "./_generated/server";
+import { requireCapability } from "./lib/auth";
 import { recordAudit, diffFields } from "./lib/audit";
+import { authedMutation, authedQuery } from "./lib/functions";
 import { deviceListPageSize, heartbeatWindowMs } from "./lib/config";
 import {
   normalizeExternalIdKey,
@@ -14,6 +15,11 @@ import {
   validateRequiredTrimmed,
   type FieldError,
 } from "./lib/validation";
+
+// Role matrix (spec `specs/auth-roles/spec.md` "Users & roles"): reads need
+// `data.read` (all four roles); register/update/decommission/reactivate/
+// changeHistory need `device.manage` (admin). Every write appends an audit
+// row in the same mutation (R11).
 
 const statusValidator = v.union(
   v.literal("online"),
@@ -79,7 +85,8 @@ function selectDeviceSource(ctx: QueryCtx, { zone, type, status, includeDecommis
  * AND. Defaults to in-service devices only (R25); `includeDecommissioned` is
  * admin-only and marks them.
  */
-export const list = query({
+export const list = authedQuery({
+  capability: "data.read",
   args: {
     paginationOpts: paginationOptsValidator,
     zone: v.optional(v.string()),
@@ -89,7 +96,7 @@ export const list = query({
   },
   handler: async (ctx, { paginationOpts, zone, type, status, includeDecommissioned }) => {
     if (includeDecommissioned) {
-      await requireAdmin(ctx);
+      await requireCapability(ctx, "device.manage");
     }
 
     // R11: bound the result set server-side regardless of what a caller
@@ -117,7 +124,8 @@ export const list = query({
 });
 
 /** Detail: registry fields + lifecycle + connectivity, all from the one stored row (R5, R28). */
-export const get = query({
+export const get = authedQuery({
+  capability: "data.read",
   args: { deviceId: v.id("devices") },
   handler: async (ctx, { deviceId }) => {
     return ctx.db.get(deviceId);
@@ -129,7 +137,8 @@ export const get = query({
  * that actually exist (no hard-coded list), respecting the filters already
  * active on the other dimensions.
  */
-export const facets = query({
+export const facets = authedQuery({
+  capability: "data.read",
   args: {
     zone: v.optional(v.string()),
     type: v.optional(v.string()),
@@ -138,7 +147,7 @@ export const facets = query({
   },
   handler: async (ctx, args) => {
     if (args.includeDecommissioned) {
-      await requireAdmin(ctx);
+      await requireCapability(ctx, "device.manage");
     }
 
     // Deliberately NOT `selectDeviceSource`: each tally below excludes its
@@ -194,14 +203,14 @@ export const facets = query({
   },
 });
 
-/** R31: admin-only change history for one device, newest first. */
-export const changeHistory = query({
+/** R17/R31: admin-only change history for one device, newest first. */
+export const changeHistory = authedQuery({
+  capability: "device.manage",
   args: { deviceId: v.id("devices") },
   handler: async (ctx, { deviceId }) => {
-    await requireAdmin(ctx);
     return ctx.db
       .query("auditLog")
-      .withIndex("by_entity", (q) => q.eq("entityTable", "devices").eq("entityId", deviceId))
+      .withIndex("by_target", (q) => q.eq("targetTable", "devices").eq("targetId", deviceId))
       .order("desc")
       .collect();
   },
@@ -212,7 +221,8 @@ export const changeHistory = query({
 // ---------------------------------------------------------------------------
 
 /** R12/R18/R19/R20/R22/R23: validate → insert → audit. */
-export const register = mutation({
+export const register = authedMutation({
+  capability: "device.manage",
   args: {
     externalId: v.string(),
     name: v.string(),
@@ -221,8 +231,6 @@ export const register = mutation({
     metadata: v.optional(v.record(v.string(), v.string())),
   },
   handler: async (ctx, args) => {
-    const actor = await requireAdmin(ctx);
-
     const errors: FieldError[] = [];
     const externalId = validateRequiredTrimmed("externalId", args.externalId, errors);
     const name = validateRequiredTrimmed("name", args.name, errors);
@@ -258,10 +266,10 @@ export const register = mutation({
     });
 
     await recordAudit(ctx, {
-      entityTable: "devices",
-      entityId: deviceId,
+      actorId: ctx.user._id,
       action: "device.register",
-      actor,
+      targetTable: "devices",
+      targetId: deviceId,
       changes: [
         { field: "externalId", after: externalId },
         { field: "name", after: name },
@@ -283,7 +291,8 @@ export const register = mutation({
  * before this handler ever runs, which is what makes the identifier
  * immutable (R21) at the platform level.
  */
-export const update = mutation({
+export const update = authedMutation({
+  capability: "device.manage",
   args: {
     deviceId: v.id("devices"),
     name: v.optional(v.string()),
@@ -292,7 +301,6 @@ export const update = mutation({
     metadata: v.optional(v.record(v.string(), v.string())),
   },
   handler: async (ctx, args) => {
-    const actor = await requireAdmin(ctx);
     const device = await ctx.db.get(args.deviceId);
     if (!device) {
       throw new ConvexError({ message: "Device not found" });
@@ -330,10 +338,10 @@ export const update = mutation({
 
     await ctx.db.patch(args.deviceId, patch);
     await recordAudit(ctx, {
-      entityTable: "devices",
-      entityId: args.deviceId,
+      actorId: ctx.user._id,
       action: "device.update",
-      actor,
+      targetTable: "devices",
+      targetId: args.deviceId,
       changes,
     });
 
@@ -342,10 +350,10 @@ export const update = mutation({
 });
 
 /** R14/R24: non-destructive — only lifecycle (+ who/when) changes; history is untouched. */
-export const decommission = mutation({
+export const decommission = authedMutation({
+  capability: "device.manage",
   args: { deviceId: v.id("devices") },
   handler: async (ctx, { deviceId }) => {
-    const actor = await requireAdmin(ctx);
     const device = await ctx.db.get(deviceId);
     if (!device) {
       throw new ConvexError({ message: "Device not found" });
@@ -357,13 +365,13 @@ export const decommission = mutation({
     await ctx.db.patch(deviceId, {
       lifecycle: "decommissioned",
       decommissionedAt: Date.now(),
-      decommissionedBy: actor.userId,
+      decommissionedBy: ctx.user._id,
     });
     await recordAudit(ctx, {
-      entityTable: "devices",
-      entityId: deviceId,
+      actorId: ctx.user._id,
       action: "device.decommission",
-      actor,
+      targetTable: "devices",
+      targetId: deviceId,
       changes: [{ field: "lifecycle", before: "in_service", after: "decommissioned" }],
     });
 
@@ -372,10 +380,10 @@ export const decommission = mutation({
 });
 
 /** R14/R24: restores the device to `in_service`, recomputing connectivity once. */
-export const reactivate = mutation({
+export const reactivate = authedMutation({
+  capability: "device.manage",
   args: { deviceId: v.id("devices") },
   handler: async (ctx, { deviceId }) => {
-    const actor = await requireAdmin(ctx);
     const device = await ctx.db.get(deviceId);
     if (!device) {
       throw new ConvexError({ message: "Device not found" });
@@ -392,10 +400,10 @@ export const reactivate = mutation({
       status,
     });
     await recordAudit(ctx, {
-      entityTable: "devices",
-      entityId: deviceId,
+      actorId: ctx.user._id,
       action: "device.reactivate",
-      actor,
+      targetTable: "devices",
+      targetId: deviceId,
       changes: [{ field: "lifecycle", before: "decommissioned", after: "in_service" }],
     });
 
@@ -468,4 +476,3 @@ export const backfillLifecycle = internalMutation({
     return { migrated };
   },
 });
-

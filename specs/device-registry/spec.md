@@ -266,6 +266,12 @@ the same branch:
   `auth-roles` and must be re-checked then. This is a known gap, not a satisfied
   criterion.
 
+**Resolved:** `auth-roles` has merged. The gap above is closed — `devices.register`/
+`update`/`decommission`/`reactivate`/`changeHistory` are now `authedMutation`/
+`authedQuery({capability: "device.manage", ...})` (real, deployed, on-by-default RBAC;
+no permissive escape hatch), and R16 is backed by a real sign-in flow and `users.me`
+rather than a mocked role. See `plan.md`'s "Auth seam" section for what changed.
+
 ## Open questions
 
 Items marked **[resolved by planner]** were decided during planning and are recorded

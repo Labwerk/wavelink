@@ -1,111 +1,155 @@
 # Tasks: Authentication & role-based access control
 
-> Written by builder. Ordered by dependency. Every requirement in `spec.md` is
-> covered. Mark `- [x]` only when its acceptance check passes (typecheck + tests
-> run locally). Read `node_modules/next/dist/docs/` and the current `@convex-dev/auth`
-> Next.js guide before the frontend tasks — Next.js 16 differs from training data.
+> Written by builder against `plan.md` revision 3 (rev 3 = review round 1
+> fixes; tasks T16-T21 are new). Ordered by dependency (setup -> core -> edge
+> cases -> tests). Every requirement R1-R13 is covered. A task is ticked only
+> when its acceptance check passed locally: typecheck
+> (`npx tsc -p backend|tests --noEmit`, `frontend`, `gateway/simulator`) and
+> `npm test` (run from `D:/Self/wavelink`; from lowercase `d:/` vitest fails
+> with "No test suite found" - a drive-letter case quirk of this machine).
+> The earlier "Implement M2 auth & roles" commit was verified against the code;
+> only what was missing or wrong was rebuilt.
 
 ## Setup
 
-- [ ] **T1** — Add deps: `@convex-dev/auth`, `@auth/core` (root/backend); confirm
-  `convex` version peer-req and bump if needed.
-  - Files: `package.json`, `package-lock.json`
-  - Satisfies: R1 (foundation)
-  - Acceptance: `npm install` clean; `npx convex dev` starts without version errors.
+- [x] **T1** — Dependencies and test harness (already present from the M2 commit; verified). `@convex-dev/auth` now pinned to exactly `0.0.95` (see T12).
+  - Files: `package.json`, `frontend/package.json`, `vitest.config.ts`
+  - Satisfies: enables R2-R13 tests
+  - Acceptance: `@convex-dev/auth@0.0.95`, `@auth/core`, `convex-test`, `vitest` installed; `npm test` runs.
 
-- [ ] **T2** — Add test harness: `convex-test` + `vitest` + config.
-  - Files: `package.json`, `vitest.config.ts`, `backend/vitest-setup` if needed
-  - Satisfies: enables R3–R7 tests
-  - Acceptance: `npm test` runs an empty suite green.
+## Core (backend)
 
-## Schema & auth core
+- [x] **T2** — Capability map and rank comparison.
+  - Files: `backend/lib/permissions.ts`
+  - Satisfies: R5, R4 (unknown capability/role never granted)
+  - Acceptance: `tests/permissions.test.ts` - map matches the spec table per role, inheritance holds, unknown/prototype-key capabilities denied.
 
-- [ ] **T3** — Schema: add `...authTables`; redefine `users` with Convex Auth base
-  fields + `role` (4-literal union) + `isActive`; keep `by_role` index; drop `authId`.
+- [x] **T3** — Schema: drop `users.authId`/`by_authId`; add `by_email`, `users.createdBy` (optional id), and the `auditLog` table (`actorId` optional, absent only for deployment-admin-key operations).
   - Files: `backend/schema.ts`
-  - Satisfies: R2
-  - Acceptance: `convex dev` typechecks; `alertRules.createdBy`/`alerts.acknowledgedBy` still compile.
+  - Satisfies: R2, R11
+  - Acceptance: backend typecheck clean; `tests/provisioning.test.ts` - a role outside the four, or a missing role, cannot be stored.
 
-- [ ] **T4** — Convex Auth wiring: `auth.ts` (Password provider + `afterUserCreatedOrUpdated`
-  assigning role from `INITIAL_ADMIN_EMAILS` else `viewer`), `auth.config.ts`, `http.ts` routes.
-  - Files: `backend/auth.ts`, `backend/auth.config.ts`, `backend/http.ts`
-  - Satisfies: R2, R13
-  - Acceptance: sign-up creates a user with the expected default/admin role (test).
+- [x] **T4** — Server authorization: `requireCapability` (identity = `getAuthUserId` -> `users._id`, role from the row per call, single opaque `NOT_AUTHORIZED`), audit helper.
+  - Files: `backend/lib/auth.ts`, `backend/lib/audit.ts`
+  - Satisfies: R1, R3, R6, R11
+  - Acceptance: `tests/permissions.test.ts`, `tests/users.test.ts` - unauthenticated, wrong-role, deactivated, missing-row and unknown-capability denials are identical; forged identity claims are ignored.
 
-- [ ] **T5** — Authorization helpers: `getCurrentUser`, `requireAuth`, `requireRole(min)`
-  with numeric rank; uniform opaque error for forbidden vs not-found.
-  - Files: `backend/lib/auth.ts`
-  - Satisfies: R3, R4, R5, R6
-  - Acceptance: unit tests — each role allowed vs forbidden action; deny-by-default; opaque error.
+- [x] **T5** — Deny-by-default wrappers `authedQuery`/`authedMutation`/`authedAction` (capability required, no default), internal `authz.authorize` for actions, allow-list module (now only `users:me`).
+  - Files: `backend/lib/functions.ts`, `backend/authz.ts`, `backend/lib/publicEntryPoints.ts`
+  - Satisfies: R3, R4
+  - Acceptance: backend typecheck clean; wrapped actions authorize (users.createUser tests).
+
+- [x] **T6** — Meta-test failing any exported function on a raw `query`/`mutation`/`action` outside the allow-list (and any unauthorised import of the raw builders).
+  - Files: `tests/denyByDefault.test.ts`
+  - Satisfies: R4
+  - Acceptance: passes on the tree; "no stale exceptions" case guarantees `users:bootstrapAdmin` is no longer allow-listed; verified in round 1 that it fails when a raw-builder export is added.
+
+## Auth wiring and provisioning
+
+- [x] **T7** — Convex Auth config: Password provider whose `profile` rejects every flow except `signIn`; session 8 h idle / 7 d hard cap / 1 h JWT. **Rev 3:** the creation callback delegates to `createUserRecord`, which decides everything inside the account-creation transaction: (a) table empty AND email == `INITIAL_ADMIN_EMAIL` -> admin + `user.bootstrapAdmin` audit row, re-derived from DB/env; (b) `profile.createdBy` is an existing, active admin -> viewer + `createdBy` + `user.create` audit row; (c) otherwise throw. Any role/isActive in the profile is ignored.
+  - Files: `backend/auth.ts`, `backend/lib/provisioning.ts`
+  - Satisfies: R2, R3, R10, R11, R13, provisioning + default-role decisions
+  - Acceptance: `tests/provisioning.test.ts`, `tests/accounts.test.ts` "creation is one transaction" - `signUp` and other flows throw; empty table + wrong email, non-empty table with no/invalid `createdBy` (viewer, operator, inactive admin, deleted admin, garbage, number, null) all reject with users/accounts/auditLog counts unchanged; valid admin `createdBy` yields viewer + audit in one go; forged `role: "admin"` yields viewer.
+
+- [x] **T8** — `users` module: `me` (never throws; null when signed out/deactivated; returns capabilities), `list`, `setRole` (authorize first, audit row same mutation, last-*active*-admin protection), `setActive` (admin-only, audited, not yourself, not the last active admin), `createUser` (admin action; passes server-resolved `createdBy`; no follow-up mutation), admin-only `audit.list`.
+  - Files: `backend/users.ts`, `backend/audit.ts`
+  - Satisfies: R2, R6, R7, R8, R11
+  - Acceptance: `tests/users.test.ts`, `tests/accounts.test.ts` - non-admin denied / admin allowed; role change and activation changes reflected, audited (actor, target, from/to, time) and effective on the next call; last admin cannot be demoted or deactivated (an inactive admin does not count); createUser yields viewer with `createdBy` and one `user.create` row.
+
+- [x] **T16** — Deployment-admin-key internal functions (rev 3 C1/C3, issues 1, 2, 5): `users.bootstrapAdmin` is an `internalAction` (run via `npx convex run`; empty-table + `INITIAL_ADMIN_EMAIL` checks kept as defence in depth); `users.promoteBootstrapAdmin` kept as internal-only recovery (audited, no actor); new `users.setPassword` `internalAction` (`modifyAccountCredentials` + `invalidateSessions`, audited, no UI).
+  - Files: `backend/users.ts`, `backend/lib/publicEntryPoints.ts`
+  - Satisfies: R13, R3, R11
+  - Acceptance: `tests/accounts.test.ts` - bootstrap creates admin + account + audit row; refuses wrong email / existing users / unset env / second run / short password with nothing left behind; source declares `internalAction` and no public `bootstrapAdmin`; recovery promotes a lone stranded user and refuses otherwise; `setPassword` changes the credential, deletes sessions, audit row has no `actorId` and `via: deployment-admin-key`.
 
 ## Apply RBAC to existing functions
 
-- [ ] **T6** — Gate reads with `requireAuth`: `devices.list`, `devices.get`,
-  `devices.facets`, `telemetry.latestForDevice`.
-  - Files: `backend/devices.ts`, `backend/telemetry.ts`
-  - Satisfies: R1, R3
-  - Acceptance: unauth call rejected; viewer call succeeds (test).
+- [x] **T9** — Devices and telemetry through the wrappers: reads need `data.read`; register/update/decommission/reactivate/changeHistory need `device.manage` and append audit rows.
 
-- [ ] **T7** — Gate device writes with `requireRole(admin)`, replacing the
-  device-registry auth seam (`backend/lib/access.ts`'s `requireAdmin`/`getActor`,
-  and the `access.currentActor` query, which `users.me` replaces): `devices.register`,
-  `devices.update`, `devices.decommission`, `devices.reactivate`,
-  `devices.changeHistory`. Delete `backend/lib/access.ts` once every caller is
-  switched; flip `DEVICE_REGISTRY_REQUIRE_ADMIN`'s permissive default now that a
-  real auth flow exists.
-  - Files: `backend/devices.ts`, `backend/lib/access.ts` (removed)
-  - Satisfies: R5, R16/R17/R31 (device-registry)
-  - Acceptance: viewer/operator denied, admin allowed (test); no remaining
-    references to `requireAdmin`/`getActor`/`access.currentActor`.
+  **Post-merge (device-registry integration):** written against the pre-device-registry
+  `devices.ts` (`listActive`/`get`/`register`/`update`/`deactivate`). By the time this
+  landed, `device-registry` had already shipped a richer `devices.ts` on `main`
+  (paginated `list`, `facets`, `changeHistory`, `decommission`/`reactivate` in place of
+  `deactivate`) plus its own temporary auth seam (`backend/lib/access.ts`). Reconciling
+  the two: every read (`list`/`get`/`facets`) is now `authedQuery({capability:
+  "data.read", ...})`, with an extra `requireCapability(ctx, "device.manage")` check
+  inside `list`/`facets` when `includeDecommissioned` is requested; every write plus
+  `changeHistory` is `authedMutation`/`authedQuery({capability: "device.manage", ...})`;
+  `backend/lib/access.ts`, `DEVICE_REGISTRY_REQUIRE_ADMIN`, and
+  `backend/lib/config.ts`'s `deviceRegistryRequireAdmin()` are deleted. `auditLog` grew
+  an optional `changes: FieldChange[]` field (`lib/audit.ts`) so a multi-field device
+  edit still gets one row with a real per-field before/after, alongside the existing
+  `details` used by the simpler user-management audit entries. `tests/devices.test.ts`
+  is rewritten against the real auth harness (`createUserFixture`/`NOT_AUTHORIZED`
+  instead of the seam's permissive-default env var and `ConvexError`), with a new
+  "unauthenticated caller denied every read and write" case since reads are gated now
+  too. `tests/deviceApiSurface.test.ts` (device-scoped structural scan, a stand-in the
+  seam's own plan.md section said to retire once auth-roles merged) is removed —
+  `tests/denyByDefault.test.ts` already scans `backend/**` including `devices.ts`, and
+  devices.test.ts's own admin-gating matrix proves the *right* capability is enforced
+  per operation, which the structural scan didn't check anyway.
+  - Files: `backend/devices.ts`, `backend/telemetry.ts`, `backend/lib/access.ts` (removed), `backend/lib/config.ts`, `backend/lib/audit.ts`, `backend/schema.ts`, `tests/devices.test.ts`, `tests/deviceApiSurface.test.ts` (removed)
+  - Satisfies: R1, R3, R5, R6, R11, R16/R17/R31 (device-registry)
+  - Acceptance: `tests/devices.test.ts` - all four roles read; viewer/operator/maintenance denied writes; admin allowed; audit rows carry actor and time; forbidden-existing vs non-existent target indistinguishable; deactivated user denied; no remaining references to `requireAdmin`/`getActor`/`access.currentActor`/`DEVICE_REGISTRY_REQUIRE_ADMIN`.
 
-- [ ] **T8** — Confirm `ingest.recordBatch` stays service-auth only (no user-role guard);
-  document the service-token expectation in a comment.
-  - Files: `backend/ingest.ts`
+- [x] **T10** — Ingestion behind a service credential: `ingest.recordBatch` is an internal mutation; `POST /ingest/telemetry` checks `Authorization: Bearer $INGEST_SERVICE_TOKEN` (constant-time, fails closed when unset).
+  - Files: `backend/ingest.ts`, `backend/http.ts`, `backend/lib/serviceAuth.ts`
   - Satisfies: R12
-  - Acceptance: batch write works with no user session; a user session can't substitute (test/asserted).
+  - Acceptance: `tests/ingest.test.ts` - valid token posts a batch with no session; missing/wrong token or a user-session bearer gets a bare 401 and writes nothing; unset token rejects all; malformed bodies 400.
 
-## User management
+- [x] **T11** — Simulator posts to the HTTP route with the service token and site URL; no longer calls `devices.register`; unused `convex` dependency removed (package.json and its own lockfile pruned, root lock synced).
+  - Files: `gateway/simulator/src/index.ts`, `gateway/simulator/package.json`, `gateway/simulator/package-lock.json`, `package-lock.json`, `docker-compose.yml`
+  - Satisfies: R12
+  - Acceptance: simulator typechecks; `docker compose config` parses; lockfile diff is removals only. (Live end-to-end not run.)
 
-- [ ] **T9** — `users.me` (caller profile+role or null), `users.list` (admin),
-  `users.setRole` (admin; validate target + role).
-  - Files: `backend/users.ts`
-  - Satisfies: R7, R8, R11
-  - Acceptance: non-admin denied on list/setRole; admin succeeds; `setRole` change reflected (test).
+## Frontend (Next.js 16)
 
-## Frontend
-
-- [ ] **T10** — Provider + middleware: `ConvexAuthNextjsProvider`, `middleware.ts`
-  protecting app routes.
-  - Files: `frontend/app/providers.tsx`, `frontend/middleware.ts`
+- [x] **T12** — `frontend/proxy.ts` (Next 16 name; `convexAuthNextjsMiddleware`, session cookie, redirect signed-out to `/signin`), `ConvexAuthNextjsServerProvider` in `layout.tsx`, `ConvexAuthNextjsProvider` in `providers.tsx`. **Rev 3 (issue 4):** `frontend/lib/normalizeRedirect.ts` turns the library's "200 + location + cleared cookies" (invalid/expired session) back into a real 307 to `/signin`; `@convex-dev/auth` pinned to `0.0.95` in both package.json files and the lock.
+  - Files: `frontend/proxy.ts`, `frontend/lib/normalizeRedirect.ts`, `frontend/app/layout.tsx`, `frontend/app/providers.tsx`, `package.json`, `frontend/package.json`, `package-lock.json`
   - Satisfies: R1, R10
-  - Acceptance: signed-out hit on `/` redirects to sign-in; session persists across reload.
+  - Acceptance: `tests/proxy.test.ts` (wrapper turns the library's 200+location into a 3xx and keeps cookies; other responses untouched); `next build` lists the Proxy; `next start` + curl: before the fix a request with forged `__convexAuthJWT`/`__convexAuthRefreshToken` cookies got `200` + `location: /signin`, after it gets `307` + `location: /signin` + all three cookies cleared, and following it ends at `/signin` (200); no-cookie requests 307; `/signin` 200. NOT verified against a live backend with a genuinely expired session (needs a running deployment).
 
-- [ ] **T11** — Sign-in page (email+password, no public sign-up) + sign-out control.
-  - Files: `frontend/app/signin/page.tsx`, `frontend/app/page.tsx`
-  - Satisfies: R10
-  - Acceptance: valid creds sign in; sign-out returns to protected state.
+- [x] **T13** — Sign-in page (sign-in only, no sign-up toggle); signed-in header (email/role, sign-out) and role gating from `me.capabilities`; `/admin/users` (user list, role selector, activate/deactivate, create-user form, audit list) shown only with `user.manage`; audit rows without an actor render as "deployment admin key".
 
-- [ ] **T12** — Role-based UI gating on the dashboard via `useQuery(api.users.me)`.
-  Also swap `frontend/app/devices/DevicesView.tsx`'s existing
-  `useQuery(api.lib.access.currentActor, {})` (the device-registry seam, whose
-  `isAdmin` prop already flows into `DeviceDetail.tsx`) for the same `users.me`
-  role check.
-  - Files: `frontend/app/page.tsx`, `frontend/app/devices/DevicesView.tsx`
-  - Satisfies: R8, R9
-  - Acceptance: viewer sees no admin/operator controls; admin sees user-management entry;
-    device admin controls (register/edit/decommission/history) still gate correctly.
+  **Post-merge (device-registry integration):** `device-registry` had already replaced
+  `app/page.tsx` with a bare `redirect("/devices")` to its own richer device UI, so the
+  sign-out/role/admin-link header this task built into `app/page.tsx`'s `Dashboard`
+  component would have become dead code. Moved into a new `frontend/app/SiteHeader.tsx`
+  client component, mounted once in `layout.tsx` above `{children}`, so it renders on
+  every authenticated page (`/devices`, `/admin/users`, ...) rather than only the old
+  inline dashboard. `frontend/app/devices/DevicesView.tsx`'s own `isAdmin` (previously
+  `useQuery(api.lib.access.currentActor, {})`, the now-deleted device-registry seam) is
+  swapped to `useQuery(api.users.me)` + `capabilities.includes("device.manage")`, the
+  same capability `DevicesView` already used to gate register/edit/decommission/history.
+  - Files: `frontend/app/signin/page.tsx`, `frontend/app/page.tsx`, `frontend/app/SiteHeader.tsx`, `frontend/app/layout.tsx`, `frontend/app/admin/users/page.tsx`, `frontend/app/devices/DevicesView.tsx`
+  - Satisfies: R7, R8, R9, R10
+  - Acceptance: frontend typecheck + `next build` clean; device admin controls (register/edit/decommission/history) still gate correctly on `users.me`. Interactive behaviour NOT exercised in a browser - see T20.
 
 ## Config & docs
 
-- [ ] **T13** — Env vars for Convex Auth + `INITIAL_ADMIN_EMAILS`; document first-admin
-  bootstrap and the sign-in flow in README.
-  - Files: `.env.example`, `frontend/.env.local.example`, `README.md`
-  - Satisfies: R13
-  - Acceptance: following README on a clean deploy yields a working admin account.
+- [x] **T14** — Env vars and README (rev 3): bootstrap documented as an admin-key-only internal function for Quickstart and Docker, with the email/empty-table checks described as defence in depth (not the security boundary); break-glass `setPassword` / `promoteBootstrapAdmin`; atomic attribution; deactivation; session policy and the library pin/workaround; no-notification decision; `authId` reset note.
+  - Files: `.env.example`, `docker-compose.yml`, `README.md`
+  - Satisfies: R13, R10
+  - Acceptance: README commands match the function names/args covered by `tests/accounts.test.ts`. A fresh `docker compose down -v && up` run was NOT performed.
+
+## Review round 1 clean-up
+
+- [x] **T17** — Delete the stub tests `tests/tmp.test.ts` and `tests/tmp2.test.ts` (issue 7).
+  - Satisfies: hygiene
+  - Acceptance: files gone; `npm test` count no longer includes them.
+
+- [x] **T18** — Remove the unused `convex` dependency from the simulator (issue 8) - see T11.
+
+- [ ] **T19** — `backend/_generated/api.d.ts` (issue 10): `npx convex codegen` was attempted and cannot run here ("No CONVEX_DEPLOYMENT set, run `npx convex dev` to configure a Convex project"), so the hand-edited file is unchanged. Typecheck passes against it; it must be regenerated by a real `npx convex dev` / codegen run against a deployment.
+  - Acceptance: attempted; NOT regenerated. Open item.
+
+- [x] **T20** — Written manual smoke checklist for a human (issue 6): `specs/auth-roles/smoke-checklist.md`. Every row is unrun; the Result column is blank on purpose.
+  - Satisfies: R1, R9, R10, R12, R13 (manual evidence still owed)
+  - Acceptance: file exists; no results claimed.
 
 ## Verification
 
-- [ ] **T14** — Full pass: `convex dev` typecheck clean, `npm test` green, manual
-  smoke of sign-in → role-gated dashboard. Hand to reviewer.
+- [x] **T15** — Full pass: backend/tests/frontend/simulator typecheck clean; `npm test` green (102 tests, 8 files); `next build` green; `docker compose config` parses.
   - Satisfies: all
-  - Acceptance: all tests pass; reviewer confirms R1–R13.
+  - Acceptance: recorded in the hand-off report; reviewer confirms R1-R13.
+
+- [ ] **T21** — Issue 11 (confirm the plan's "Confirm before build" defaults with the user) is owned by main; the builder took no action.

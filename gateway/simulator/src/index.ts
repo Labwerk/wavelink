@@ -1,53 +1,37 @@
 // Telemetry simulator: stands in for a real protocol adapter (MQTT/OPC-UA/etc.)
-// through v1. Calls the same ingestion mutation a real gateway would.
+// through v1. Posts batches to the same HTTP ingestion route a real gateway
+// would use, authenticating with the INGEST_SERVICE_TOKEN service credential
+// (spec `specs/auth-roles/spec.md` R12) - not with any user session.
 // See plans/implementation-plan.md, Phase M1 decision.
 
-import { ConvexHttpClient } from "convex/browser";
-import { anyApi } from "convex/server";
-import { ConvexError } from "convex/values";
-
-const CONVEX_URL = process.env.CONVEX_URL;
-if (!CONVEX_URL) {
-  throw new Error("CONVEX_URL env var is required (e.g. http://backend:3210)");
+// HTTP actions are served from the deployment's *site* URL (self-hosted:
+// port 3211, `.convex.site` on Convex Cloud) - not the 3210 API URL.
+const CONVEX_SITE_URL = process.env.CONVEX_SITE_URL?.replace(/\/+$/, "");
+if (!CONVEX_SITE_URL) {
+  throw new Error(
+    "CONVEX_SITE_URL env var is required (e.g. http://backend:3211, the HTTP-actions URL)",
+  );
+}
+const INGEST_SERVICE_TOKEN = process.env.INGEST_SERVICE_TOKEN;
+if (!INGEST_SERVICE_TOKEN) {
+  throw new Error(
+    "INGEST_SERVICE_TOKEN env var is required (must match the value set on the Convex deployment)",
+  );
 }
 
 const INTERVAL_MS = Number(process.env.SIMULATOR_INTERVAL_MS ?? 2000);
 const BATCH_METRICS = ["temperature_c", "cycle_count", "error_code"] as const;
 
+// Devices are registered by an admin from the dashboard (`devices.register`
+// is admin-only); telemetry for devices that do not exist yet is safely
+// skipped by `ingest.recordBatch`. Register these externalIds to see data.
 const SIMULATED_DEVICES = [
   { externalId: "sim-cnc-01", name: "CNC Mill 1", type: "cnc-mill", zone: "line-a" },
   { externalId: "sim-agv-01", name: "AGV 1", type: "agv", zone: "warehouse" },
   { externalId: "sim-arm-01", name: "Robot Arm 1", type: "robot-arm", zone: "line-b" },
 ];
 
-const client = new ConvexHttpClient(CONVEX_URL);
-
 let cycleCounts = new Map<string, number>(SIMULATED_DEVICES.map((d) => [d.externalId, 0]));
-
-function isAlreadyRegisteredError(err: unknown): boolean {
-  if (!(err instanceof ConvexError)) return false;
-  const data = err.data as { fieldErrors?: { field: string; message: string }[] };
-  return Boolean(
-    data?.fieldErrors?.some(
-      (fe) => fe.field === "externalId" && /already registered/.test(fe.message),
-    ),
-  );
-}
-
-async function ensureDevicesRegistered() {
-  for (const device of SIMULATED_DEVICES) {
-    try {
-      await client.mutation(anyApi.devices.register, device);
-      console.log(`Registered device ${device.externalId}`);
-    } catch (err) {
-      if (isAlreadyRegisteredError(err)) continue; // expected on restarts
-      // Anything else (admin-gating denial, validation failure, network error)
-      // must be visible — swallowing it here caused silent ingestion outages
-      // when DEVICE_REGISTRY_REQUIRE_ADMIN is enabled without a service actor.
-      console.error(`Failed to register device ${device.externalId}:`, err);
-    }
-  }
-}
 
 function randomReading(externalId: string, ts: number) {
   const cycles = (cycleCounts.get(externalId) ?? 0) + 1;
@@ -74,7 +58,21 @@ async function tick() {
   const ts = Date.now();
   const readings = SIMULATED_DEVICES.flatMap((d) => randomReading(d.externalId, ts));
   try {
-    await client.mutation(anyApi.ingest.recordBatch, { readings });
+    const response = await fetch(`${CONVEX_SITE_URL}/ingest/telemetry`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${INGEST_SERVICE_TOKEN}`,
+      },
+      body: JSON.stringify({ readings }),
+    });
+    if (!response.ok) {
+      console.error(
+        `Ingest rejected the batch: HTTP ${response.status}` +
+          (response.status === 401 ? " (check INGEST_SERVICE_TOKEN)" : ""),
+      );
+      return;
+    }
     console.log(`Sent batch of ${readings.length} readings`);
   } catch (err) {
     console.error("Failed to send batch", err);
@@ -82,7 +80,6 @@ async function tick() {
 }
 
 async function main() {
-  await ensureDevicesRegistered();
   setInterval(tick, INTERVAL_MS);
   await tick();
 }

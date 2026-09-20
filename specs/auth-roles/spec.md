@@ -30,15 +30,23 @@ device edits) to a person.
 - Multi-tenant / multi-site isolation (explicitly deferred in the foundation spec).
 - Per-device or per-zone access control lists — roles are system-wide in v1.
 - Device *control* authorization (bidirectional command safety) — out of scope.
-- Self-service public sign-up, MFA, and SSO/SAML federation — not in v1 unless the
-  chosen provider gives them for free.
+- Self-service public sign-up, MFA, and SSO/SAML federation — not in v1.
 - Authorization for the ingestion/gateway path beyond confirming it uses a
   *service* credential, not an end-user role.
+
+## Definitions
+
+- **Protected data** — any device, telemetry, alert, or user data owned by the
+  product. Everything except the sign-in screen itself and static assets.
+- **Protected operation** — any server-side read or write of protected data.
+- **Capability** — a named action a role may perform (e.g. "acknowledge an alert").
 
 ## Users & roles
 
 Four roles, from least to most privileged. Each higher role includes everything
-the ones below it can do.
+the ones below it can do. All four roles exist from day one; a capability listed
+for a feature that has not shipped yet becomes enforceable when that feature
+lands, and until then the role ordering below is what is verified.
 
 | Role | Can do |
 |---|---|
@@ -66,8 +74,8 @@ the ones below it can do.
 Each is a single, independently testable statement. IDs are stable — the planner
 and reviewer reference them.
 
-- **R1** — All access to product data requires an authenticated session;
-  unauthenticated requests receive no product data and are directed to sign in.
+- **R1** — All access to protected data requires an authenticated session;
+  unauthenticated requests receive no protected data and are directed to sign in.
 - **R2** — Every authenticated user is associated with exactly one role from
   {viewer, operator, maintenance, admin}.
 - **R3** — Every server operation that reads or writes protected data checks the
@@ -87,7 +95,8 @@ and reviewer reference them.
 - **R10** — A user can sign in and sign out; a signed-in session persists across a
   page reload until sign-out or expiry.
 - **R11** — Every state-changing operation is attributable to the authenticated
-  user who performed it (e.g. an acknowledged alert records who and when).
+  user who performed it (e.g. a role change, or an acknowledged alert, records
+  who and when).
 - **R12** — The ingestion/gateway entry point authenticates with a service
   credential distinct from end-user auth and is not governed by the four user roles.
 - **R13** — A fresh deployment has a defined, documented way to establish the first
@@ -95,7 +104,7 @@ and reviewer reference them.
 
 ## Acceptance criteria
 
-- **R1** — Hitting any product route or data query while signed out returns no
+- **R1** — Hitting any protected route or data query while signed out returns no
   data and yields a sign-in prompt.
 - **R2** — Each user record resolves to one and only one role; no user can hold
   zero or multiple roles.
@@ -111,12 +120,16 @@ and reviewer reference them.
   admin succeeds.
 - **R8** — The "current user" lookup returns the caller's role; a protected call
   still re-checks and denies when appropriate even if the client claims otherwise.
-- **R9** — For a viewer session, no acknowledge/edit/admin controls are rendered
-  or are disabled.
+- **R9** — For a viewer session, every state-changing control that exists in the
+  current build (device edit, user/role admin, and alert acknowledge once it
+  exists) is absent or disabled; the same controls are present and usable for a
+  role that is allowed to use them.
 - **R10** — After sign-in and a page reload the session is still valid; after
   sign-out, protected data is inaccessible again.
-- **R11** — Acknowledging an alert records the acting user's identity and timestamp,
-  visible in the alert's history.
+- **R11** — For each state-changing operation that exists in the current build,
+  the stored record identifies the acting user and the time of the action —
+  verified now on a role change (who changed whom, and when), and on alert
+  acknowledgement when that operation ships.
 - **R12** — The gateway can post a telemetry batch with its service credential and
   without any user session; a user session cannot be used in its place.
 - **R13** — Following the documented bootstrap step on a clean deployment yields a
@@ -124,14 +137,21 @@ and reviewer reference them.
 
 ## Open questions
 
-- **Auth provider** — Convex Auth, Clerk, WorkOS, or custom OIDC? Affects the shape
-  of stored user identity and the login flow. (Foundation open question; planner to
-  resolve with the team.)
-- **Account provisioning** — admin-invites-only, or self-service sign-up gated by
-  an allowlist/domain?
-- **First-admin bootstrap** — env-configured seed admin, a one-time setup token, or
-  a CLI/seed script? (Drives R13.)
-- **Maintenance role in v1** — ship all four roles now, or defer maintenance until
-  historical playback lands?
-- **Session expiry policy** — idle timeout vs fixed lifetime; provider default vs
-  explicit.
+Resolved (see `plan.md` for the mechanism; the spec only records the behavioral
+outcome):
+
+- **Identity mechanism** — must be self-hosted alongside the rest of the system,
+  with no dependency on an external hosted identity service.
+- **Account provisioning** — invite-only in v1: accounts are not self-service, and
+  a newly created account starts at the least-privileged role (viewer) until an
+  admin promotes it.
+- **Maintenance role in v1** — all four roles ship now, per R2.
+- **Session expiry policy** — idle timeout of 8 hours plus a 7-day hard cap, with a
+  session cookie (signed out on browser close). Documented in `plan.md`'s "Decisions"
+  table and README "Session policy"; implemented in `backend/auth.ts` and
+  `frontend/proxy.ts`.
+- **Role-change notification** — no notification channel in v1. `users.me` is a live
+  query, so the effect is visible within about a second without a reload, and every
+  role/activation change is written to the audit log.
+
+No open questions remain.

@@ -131,6 +131,17 @@ and IDs unchanged) and calls it *a known gap, not a satisfied criterion*. The re
 those three as **partially verified**, and the auth-roles merge must re-check all three end-to-end and
 flip `DEVICE_REGISTRY_REQUIRE_ADMIN` to strict.
 
+**Resolved (auth-roles merged):** the swap predicted above happened, mechanically as expected but with
+different real names than guessed here — `requireRole(ctx, "admin")` doesn't exist; the actual system is
+capability-based (`specs/auth-roles/plan.md`'s "Decisions" table), so every device write and
+`changeHistory` became `authedMutation`/`authedQuery({capability: "device.manage", ...})`
+(`backend/lib/functions.ts` + `backend/lib/permissions.ts`), and reads became
+`authedQuery({capability: "data.read", ...})`. `access.ts`, `access.currentActor`, and
+`DEVICE_REGISTRY_REQUIRE_ADMIN` (plus `backend/lib/config.ts`'s `deviceRegistryRequireAdmin()`) are
+deleted — there is no flag left to flip. Full accounting of the merge is in
+`specs/auth-roles/plan.md`'s "What changes against the current implementation" (post-merge note under
+the `devices.ts`/`telemetry.ts` bullet) and `specs/auth-roles/tasks.md` T9.
+
 ## Data model
 
 ### `devices` (modified)

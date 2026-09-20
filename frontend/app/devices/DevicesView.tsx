@@ -47,8 +47,8 @@ function useUrlState() {
 
 export function DevicesView() {
   const { zone, type, status, includeDecommissioned, groupBy, setParams } = useUrlState();
-  const actor = useQuery(api.lib.access.currentActor, {});
-  const isAdmin = actor?.role === "admin";
+  const me = useQuery(api.users.me);
+  const isAdmin = me?.capabilities.includes("device.manage") ?? false;
 
   const [selectedId, setSelectedId] = useState<Id<"devices"> | null>(null);
   const [showRegister, setShowRegister] = useState(false);

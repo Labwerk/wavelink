@@ -1,11 +1,20 @@
-// Attribution (spec R29, R30): every registry change appends an `auditLog`
-// row from inside the same mutation that makes the change, so the change and
-// its record commit or roll back together — Convex mutations are atomic, so
-// a change that throws during validation leaves no trace, and a change that
-// succeeds always has exactly one entry (R30).
+// Attribution (spec R11/R29/R30): every state-changing operation appends an
+// `auditLog` row from inside the same mutation that makes the change, so the
+// change and its record commit or roll back together — Convex mutations are
+// atomic, so a change that throws during validation leaves no trace, and a
+// change that succeeds always has exactly one entry (R30). `actorId` always
+// comes from the authenticated caller - never from arguments - and `at` from
+// the server clock. The one exception is a break-glass operation run with
+// the deployment admin key, which has no user: `actorId` is then omitted and
+// `details.via` says so.
+//
+// `details` carries simple key/value context (e.g. a role change's from/to).
+// `changes` carries a structured per-field before/after diff, for an edit
+// that can touch several fields in one call (e.g. a device edit) — built via
+// `diffFields` below.
 
+import type { Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
-import type { Actor } from "./access";
 
 export type FieldChange = { field: string; before?: string; after?: string };
 
@@ -50,20 +59,13 @@ export function diffFields(
 export async function recordAudit(
   ctx: MutationCtx,
   entry: {
-    entityTable: string;
-    entityId: string;
+    actorId?: Id<"users">;
     action: string;
-    actor: Actor;
-    changes: FieldChange[];
+    targetTable?: string;
+    targetId?: string;
+    details?: Record<string, string>;
+    changes?: FieldChange[];
   },
 ): Promise<void> {
-  await ctx.db.insert("auditLog", {
-    entityTable: entry.entityTable,
-    entityId: entry.entityId,
-    action: entry.action,
-    actorUserId: entry.actor.userId,
-    actorLabel: entry.actor.label,
-    at: Date.now(),
-    changes: entry.changes,
-  });
+  await ctx.db.insert("auditLog", { ...entry, at: Date.now() });
 }
