@@ -3,7 +3,8 @@ import { v } from "convex/values";
 
 export default defineSchema({
   devices: defineTable({
-    externalId: v.string(),
+    externalId: v.string(), // Trimmed, as entered. Displayed. Immutable after registration (R21).
+    externalIdKey: v.string(), // externalId.trim().toLowerCase() — the uniqueness key (R20). Never shown.
     name: v.string(),
     type: v.string(),
     zone: v.optional(v.string()),
@@ -13,11 +14,21 @@ export default defineSchema({
       v.literal("unknown"),
     ),
     lastSeenAt: v.optional(v.number()),
-    isActive: v.boolean(),
+    // Lifecycle, distinct from connectivity `status` (R28). Replaces the old
+    // `isActive: boolean` — see specs/device-registry/plan.md "Schema migration"
+    // and devices.backfillLifecycle for migrating a deployment with legacy rows.
+    lifecycle: v.union(v.literal("in_service"), v.literal("decommissioned")),
+    decommissionedAt: v.optional(v.number()),
+    decommissionedBy: v.optional(v.id("users")),
     metadata: v.optional(v.record(v.string(), v.string())),
+    // R26: telemetry received for a decommissioned device is refused but observable.
+    rejectedReadingCount: v.optional(v.number()),
+    lastRejectedReadingAt: v.optional(v.number()),
   })
-    .index("by_externalId", ["externalId"])
-    .index("by_zone_and_status", ["zone", "status"]),
+    .index("by_externalIdKey", ["externalIdKey"])
+    .index("by_lifecycle_status_lastSeenAt", ["lifecycle", "status", "lastSeenAt"])
+    .index("by_lifecycle_and_zone", ["lifecycle", "zone"])
+    .index("by_lifecycle_and_type", ["lifecycle", "type"]),
 
   telemetry: defineTable({
     deviceId: v.id("devices"),
@@ -76,4 +87,25 @@ export default defineSchema({
   })
     .index("by_authId", ["authId"])
     .index("by_role", ["role"]),
+
+  // General audit trail (R29/R30/R31). `entityTable`/`entityId` are generic
+  // (by convention, not a typed reference) so future features — role changes,
+  // alert-rule edits — can reuse this table instead of each growing its own.
+  auditLog: defineTable({
+    entityTable: v.string(),
+    entityId: v.string(),
+    action: v.string(),
+    actorUserId: v.optional(v.id("users")),
+    actorLabel: v.string(),
+    at: v.number(),
+    changes: v.array(
+      v.object({
+        field: v.string(),
+        before: v.optional(v.string()),
+        after: v.optional(v.string()),
+      }),
+    ),
+  })
+    .index("by_entity", ["entityTable", "entityId", "at"])
+    .index("by_at", ["at"]),
 });

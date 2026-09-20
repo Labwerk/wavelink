@@ -6,8 +6,11 @@ Realtime dashboard for monitoring industrial robots/machines, built on [Convex](
 
 ## Status
 
-✅ Schema, live device/telemetry view, and telemetry simulator are working.
-🚧 Not yet built: auth/roles, alerting, historical playback, production deployment profile. See the [foundation plan](specs/foundation/plan.md) for details.
+✅ Schema, telemetry simulator, and the device registry (connectivity state, filtering/grouping, admin
+management UI, audit trail — see [`specs/device-registry/`](specs/device-registry/)) are working.
+🚧 Not yet built: auth/roles (a sign-in flow — see the permissive-admin-default warning below),
+alerting, historical playback, production deployment profile. See the
+[foundation plan](specs/foundation/plan.md) for details.
 
 ## Architecture
 
@@ -39,6 +42,7 @@ flowchart LR
 | `backend/` | Convex schema (`schema.ts`) + functions. Convex CLI commands run from the **repo root**, which finds this folder via `convex.json`. |
 | `frontend/` | Next.js dashboard app. Imports generated types from `../backend/_generated/`. |
 | `gateway/simulator/` | Standalone telemetry simulator — stands in for a real device-protocol adapter until one is built. |
+| `tests/` | Backend function tests (`convex-test` + Vitest). Kept outside `backend/` so test-only tooling never risks being bundled into a deployment. Run with `npm test`. |
 | `specs/` | SDD artifacts, one folder per feature (`spec.md` → `plan.md` → `tasks.md` → `review.md`). See [`specs/README.md`](specs/README.md). Foundation docs live in [`specs/foundation/`](specs/foundation/). |
 | `.claude/agents/` | The four SDD agents (spec-writer, planner, builder, reviewer) that drive the workflow. |
 
@@ -120,6 +124,12 @@ CONVEX_URL=<same URL as step 2> npm run dev
 
 That's it for day-to-day development. Use **Docker deployment** below only when you need to test the self-hosted path itself.
 
+**Run the backend test suite** (Convex functions, via [`convex-test`](https://www.npmjs.com/package/convex-test) + [Vitest](https://vitest.dev), no running deployment needed):
+
+```sh
+npm test
+```
+
 <details>
 <summary><strong>Running backend/frontend separately instead of <code>npm run dev</code></strong></summary>
 
@@ -161,7 +171,7 @@ That's it. Under the hood, `backend` generates its own admin key on startup and 
 docker compose --profile simulator up simulator
 ```
 
-Registers a few fake devices and posts a telemetry batch every `SIMULATOR_INTERVAL_MS` (default 2s). Refresh the dashboard to watch it update live.
+Registers a few fake devices and posts a telemetry batch every `SIMULATOR_INTERVAL_MS` (default 2s). The dashboard updates live — no refresh needed. Note the simulator calls `devices.register` with no session, so its self-registration relies on the permissive `DEVICE_REGISTRY_REQUIRE_ADMIN=false` default (see "Device registry function env vars" above) — flipping that flag also stops the simulator from auto-registering new devices.
 
 <details>
 <summary><strong>What's actually happening on <code>docker compose up</code></strong></summary>
@@ -215,6 +225,57 @@ Regenerates fresh each time you start from a clean volume (`docker compose down 
 | `DO_NOT_REQUIRE_SSL` | backend (local dev only) | Relaxes SSL requirement for local Postgres connections. |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | postgres (`--profile production` only) | Production storage credentials. Unused with the default SQLite setup. |
 | `SIMULATOR_INTERVAL_MS` | simulator (`--profile simulator` only) | How often the simulator posts a telemetry batch, in ms. |
+
+### Device registry function env vars
+
+These are **not** consumed by `docker-compose.yml` or `.env` — Convex functions read `process.env`
+from the deployment's own env store, set with `npx convex env set <NAME> <VALUE>` (Quickstart) or the
+self-hosted dashboard's "Settings > Environment Variables" (Docker deployment). Changing one takes
+effect immediately, no redeploy required.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `DEVICE_HEARTBEAT_WINDOW_MS` | `60000` (60s) | Staleness threshold past which a device reads `offline`. Reasoned from the simulator's 2s cadence, not real field data — revisit once real telemetry cadence is known. |
+| `DEVICE_METADATA_MAX_ENTRIES` | `20` | Max metadata entries per device; exceeding it is a validation failure, not truncation. |
+| `DEVICE_METADATA_MAX_KEY_LENGTH` | `64` | Max metadata key length. |
+| `DEVICE_METADATA_MAX_VALUE_LENGTH` | `256` | Max metadata value length. |
+| `DEVICE_LIST_PAGE_SIZE` | `50` | Default page size for the paginated device list. |
+| `DEVICE_REGISTRY_REQUIRE_ADMIN` | `false` | **See the warning below before deploying anywhere but a local machine.** |
+
+> ⚠️ **`DEVICE_REGISTRY_REQUIRE_ADMIN` defaults to `false`, which makes the device registry's
+> register/edit/decommission/reactivate operations callable by anyone** — this branch has no sign-in
+> flow (auth-roles is a separate, unmerged feature) to produce a real admin session, so the permissive
+> default is what makes the feature usable at all today. The enforcement path itself is real and fully
+> tested (`tests/devices.test.ts` runs the full role matrix with the flag set to `true`). **Set this to
+> `true` before any deployment reachable by anyone other than its developer.** See
+> `backend/lib/access.ts` and `specs/device-registry/plan.md` ("Auth seam") for the full design and the
+> mechanical swap to real role checks once auth-roles merges.
+
+The sweep interval (15s, bounding how quickly a stale device is marked `offline` — see
+`DEVICE_HEARTBEAT_WINDOW_MS` above) is a code constant in `backend/crons.ts`, not an env var:
+`crons.ts` is evaluated at Convex push time, so an env-driven interval would not take effect without a
+redeploy anyway.
+
+**Identifier normalization**: a device's external identifier is compared for uniqueness (and matched by
+incoming telemetry) after trimming whitespace and lowercasing — so a gateway sending `SIM-CNC-01`
+matches a device registered as `sim-cnc-01`, and registering `ROBOT-01` when `robot-01` already exists
+is refused. The as-entered (trimmed only) value is what's displayed and stored in `externalId`; the
+normalized form lives only in `externalIdKey`.
+
+### Migrating an existing deployment's `devices` table
+
+This feature replaced `devices.isActive: boolean` with `devices.lifecycle: "in_service" |
+"decommissioned"`. A fresh deployment (no existing `devices` rows) needs no extra step — `lifecycle` is
+simply required on every newly-inserted row. A deployment that already has `devices` rows from before
+this change must migrate in two steps, because Convex validates every existing row against the schema
+on push and a straight rename/add-required-field push will fail:
+
+1. Temporarily relax `backend/schema.ts` so `lifecycle` is `v.optional(...)` (keep `isActive` too), and
+   push.
+2. Run `npx convex run devices:backfillLifecycle` — a one-off `internalMutation` that sets `lifecycle`
+   from each row's legacy `isActive` (`false` → `decommissioned`, otherwise `in_service`).
+3. Re-tighten `lifecycle` to required and remove `isActive` from the schema (the state already
+   committed to this repo), and push again.
 
 ## Production (self-hosted, Postgres-backed)
 
