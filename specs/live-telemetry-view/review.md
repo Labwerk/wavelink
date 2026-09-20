@@ -4,21 +4,25 @@
 
 ## Verdict
 
-**PASS WITH ISSUES**
+**PASS**
 
 R1–R7 are fully and verifiably implemented, each backed by passing tests I ran myself
 (not just tasks.md checkmarks). R8 is correctly implemented as a thin, deny-by-default
 auth guard on every query, and — per plan.md's explicit, dated decision (2026-09-20) to
 build this feature ahead of `auth-roles` — is rightly reported as **Blocked**, not
 `Met` or `Missing`. That is a documented cross-feature dependency, not a builder defect,
-so it does not block this verdict on its own. The "issues" below are Should-fix/
-Nice-to-have items that don't affect correctness of R1–R7; there are no Blocking issues.
+so it does not block this verdict on its own.
+
+Round 1 of this review (commit 4faeefc) was PASS WITH ISSUES on one Should-fix. That was
+fixed directly in commit c4db30e (`backend/liveView.ts:36-42`, `backend/schema.ts`) and
+I independently re-verified it below — it now resolves cleanly with no remaining
+Blocking or Should-fix issues.
 
 ## Requirement coverage
 
 | Req | Status | Evidence |
 |---|---|---|
-| R1 | Met | `backend/liveView.ts:31-63` (`overview` returns `status`/`lastSeenAt` verbatim from the stored device doc, active devices only). Test: `backend/liveView.test.ts:42-79` ("shows status/lastSeenAt verbatim… (R1, R2)"), `:81-88` ("excludes decommissioned devices (R1)"). Frontend: `frontend/components/DeviceCard.tsx:39-59` renders both fields unmodified; `frontend/components/DeviceCard.test.tsx:21-27` asserts verbatim status text. |
+| R1 | Met | `backend/liveView.ts:31-66` (`overview` returns `status`/`lastSeenAt` verbatim from the stored device doc, active devices only — as of c4db30e, filtered via the indexed `by_isActive` range condition rather than a post-hoc filter; see Issues/resolved). Test: `backend/liveView.test.ts:42-79` ("shows status/lastSeenAt verbatim… (R1, R2)"), `:81-88` ("excludes decommissioned devices (R1)") — re-ran after c4db30e, still passing. Frontend: `frontend/components/DeviceCard.tsx:39-59` renders both fields unmodified; `frontend/components/DeviceCard.test.tsx:21-27` asserts verbatim status text. |
 | R2 | Met | `backend/lib/keyMetrics.ts` (per-type config, ≤4 metrics) + `backend/lib/latestMetrics.ts:22-44` (`resolveLatestMetrics`, exact `by_device_metric_and_ts` desc `.take(1)` per metric, parallel — not a sampled/stale scan). Test: `backend/liveView.test.ts:42-79` asserts the exact latest value (47, not the older 41) and that a never-reported metric is `null` not omitted. Frontend: `DeviceCard.tsx:60-69` renders `—` for `null`; `DeviceCard.test.tsx:36-39`. |
 | R3 | Met | Route `frontend/app/devices/[deviceId]/page.tsx` → `DeviceDetailView.tsx`; `backend/liveView.ts:72-111` (`deviceSnapshot`) returns the union of configured + discovered metrics, each resolved exactly, and still returns a decommissioned device rather than 404ing. Test: `backend/liveView.test.ts:117-154` (union + decommissioned-device cases); `frontend/app/devices/[deviceId]/DeviceDetailView.test.tsx:44-70,72-96` (renders metrics, labels decommissioned device instead of hiding it). |
 | R4 | Met | `backend/liveView.ts:119-139` (`recentEvents`) reads only the `telemetry` table via `by_device_and_ts`, touching neither `alerts` nor `alertRules`. Test: `backend/liveView.test.ts:184-199` asserts every returned entry's keys are exactly `["id","metric","ts","value"]` (no alert fields present to leak) and confirmed by grep — no `alerts`/`alertRules` reference anywhere in `backend/liveView.ts` or `frontend/components/EventLog.tsx`. |
@@ -38,6 +42,13 @@ Nice-to-have items that don't affect correctness of R1–R7; there are no Blocki
 - Verified the "hand-wrote `backend/_generated/`" deviation's claim directly: `backend/_generated/` exists on disk (needed for `convex-test`) but `git status --short` shows nothing under it and `.gitignore:10` lists `backend/_generated/` — confirmed not committed, as tasks.md claims.
 - Verified by grep: no `setInterval`/`router.refresh`/revalidation call in any feature file (R5), and no `alerts`/`alertRules` reference in `backend/liveView.ts` or `frontend/components/EventLog.tsx` (R4).
 
+**Round 2 (commit c4db30e, the Should-fix):** re-ran independently after the coordinator applied it —
+`npm run test` (repo root): **25/25 passed**. `npm run typecheck`: clean. `cd frontend && npm run test`:
+**26/26 passed** (frontend untouched by this commit, re-run as a sanity check anyway). `git status --short`:
+clean tree. Read the diff directly: `backend/schema.ts` adds `.index("by_isActive", ["isActive"])`;
+`backend/liveView.ts:36-42` now does `.withIndex("by_isActive", (q) => q.eq("isActive", true)).take(500)`
+— a genuine indexed range read, not a post-hoc filter. Matches the reviewer's suggested fix exactly.
+
 ## Issues
 
 **Blocking**
@@ -46,7 +57,7 @@ Nice-to-have items that don't affect correctness of R1–R7; there are no Blocki
 
 **Should-fix**
 
-- `backend/liveView.ts:36-40` — `overview` does `.withIndex("by_zone_and_status")` (no range constraint given, so it's an in-order scan of the whole index) then `.filter(isActive)` post-hoc, before `.take(500)`. This is the same shape of anti-pattern plan.md's own "Risks & unknowns" section calls out for `devices.listActive` and explicitly says not to copy ("Do **not** let `liveView.overview` copy the pattern"). It's bounded (unlike `devices.listActive`'s unbounded `.collect()`) so it isn't a functional bug at the spec's stated scale (tens–low hundreds of devices), but it doesn't get any benefit from the `by_zone_and_status` index either, since `isActive` isn't part of it. Suggestion: either add `isActive` to an index (e.g. `by_isActive_and_zone`) and query with an `.eq("isActive", true)` range condition, or note in a comment why the plain scan is acceptable at this scale so a future reader doesn't assume the index is doing filtering work it isn't.
+- None remaining. **Resolved in commit c4db30e:** `backend/liveView.ts` previously did `.withIndex("by_zone_and_status")` (an in-order scan of the whole index, no range constraint) then `.filter(isActive)` post-hoc, before `.take(500)` — the shape of anti-pattern plan.md's "Risks & unknowns" section explicitly warned not to copy from `devices.listActive`. Fix adds `devices.index("by_isActive", ["isActive"])` to `backend/schema.ts` and changes the query to `.withIndex("by_isActive", (q) => q.eq("isActive", true))` — a real indexed read, exactly the suggested fix. Independently re-verified: tests still pass (25/25 backend), typecheck clean, diff read directly.
 
 **Nice-to-have**
 
