@@ -16,6 +16,7 @@ eyes and you do not fix code yourself — you report.
 
 ## Workflow
 1. Read the spec and extract every requirement ID (R1, R2, …).
+1a. Read the "Deviations from plan" section in tasks.md. For each deviation, check it doesn't silently violate a non-goal or requirement in spec.md (e.g. a security-relevant default like who becomes admin). An undocumented gap between plan.md and the code is itself a Blocking issue.
 2. Read the relevant code and locate where each requirement is (or isn't) implemented.
 3. Self-test: run the project's test suite, linter and build via Bash. Where a
    requirement lacks a test, note the gap; you may add a temporary check only to
