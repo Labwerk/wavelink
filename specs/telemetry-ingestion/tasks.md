@@ -293,6 +293,54 @@
     this sandbox's egress policy — confirmed via the proxy status endpoint,
     not assumed). See the final summary for what this means for review.
 
+## Review round 1 fixes (specs/telemetry-ingestion/review.md, PASS WITH ISSUES)
+
+- **Should-fix, addressed:** Every `ctx.runMutation(internal.ingestStats.record, ...)`
+  call in `backend/ingestHttp.ts` (8 call sites) is now routed through a new
+  `recordStatsBestEffort(ctx, args)` helper that wraps the call in its own
+  `try/catch` and logs a structured `console.warn` on failure instead of
+  letting the exception propagate. This means a stats-write failure (e.g.
+  counter contention on the per-minute `ingestStats` document, which the
+  plan's Risks section names as plausible) can never (a) turn an already-
+  durably-committed accepted batch into an apparent failure response, or (b)
+  replace a documented `{outcome:"error", category:...}` shape with a
+  generic Convex error on any other exit path. Not a deviation from plan.md
+  — a bug fix to match the plan's own intent that stats are a secondary,
+  non-blocking concern (R25).
+- **Nice-to-have, addressed:** `retryAfter === Infinity` (when an operator
+  sets a `*_PER_MINUTE` env var to `0`) is now clamped before it can reach a
+  response. Added `clampRetryAfterMs()` + `MAX_RETRY_AFTER_MS` (24h) to
+  `backend/lib/ingestRateLimit.ts` (pure, unit-tested) and wired it into
+  `backend/ingestHttp.ts`'s `errorResponse()`, so the JSON body's
+  `retryAfterMs` and the `Retry-After` header are always finite/valid.
+- **Nice-to-have, addressed:** `docker-compose.yml`'s backend image is now
+  pinned by digest (`ghcr.io/get-convex/convex-backend@sha256:1b0dcd93a3d126400d16e256aea1106a2ee9538882dda545d2c979f28cff1483`,
+  the digest `latest` resolved to on 2026-09-20) instead of the floating
+  `:latest` tag, per plan.md's Risks section. Resolved via GHCR's manifest
+  API, which — unlike the blob-storage CDN
+  (`pkg-containers.githubusercontent.com`) that blocked the T2 spike — is
+  reachable from this sandbox; the exact `curl` commands used are in a
+  comment above the pinned line so a future update doesn't require
+  rediscovering the method.
+- **Nice-to-have, addressed (optional, per reviewer/coordinator — trivial fix
+  applied):** An empty `readings: []` array is now rejected as
+  `malformed_payload` in `backend/ingestHttp.ts` rather than succeeding with
+  a vacuous `{submitted:0, stored:0, rejected:[]}` 200 — spec.md's
+  Terminology defines a Batch as carrying "one or more readings." No
+  requirement number governs this, so not logged as a spec-requirement fix,
+  just a terminology-conformance tightening.
+- **Nice-to-have, not addressed (per coordinator, left as-is):** R7's
+  "recorded" being a log line + counter rather than a queryable per-attempt
+  row is the plan's own deliberate, documented tradeoff — revisiting it is a
+  planner-level decision, not something to change unilaterally here.
+- New tests added: `backend/lib/ingestRateLimit.test.ts` gained 4 cases
+  covering the rate-0 → `Infinity` path and `clampRetryAfterMs`'s behavior
+  (finite passthrough, `Infinity`/`NaN`/`-Infinity` clamped, and that the
+  clamped output survives `JSON.stringify` and header coercion without
+  producing `null`/`"Infinity"`). Full suite: **59/59 pass** (was 55/55).
+  `npx tsc --noEmit -p backend`, `-p gateway/simulator`, and frontend's
+  `npx tsc --noEmit` all still clean; `docker compose config -q` still valid.
+
 ## Deviations from plan
 
 > Builder fills this in immediately when implementation departs from plan.md —

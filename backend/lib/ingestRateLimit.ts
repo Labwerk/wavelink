@@ -71,3 +71,15 @@ export function applyTokenBucket(
     newState: { tokens: tokensBeforeConsume, lastRefillAt: now },
   };
 }
+
+// A rate of 0 (an operator hard-disabling a source via a `*_PER_MINUTE` env
+// var) makes `retryAfter` above mathematically Infinity — it will never
+// refill. Infinity can't survive a JSON response body
+// (`JSON.stringify(Infinity) === "null"`) or an HTTP `Retry-After` header
+// (`"Infinity"` is not a valid value), so callers building a response must
+// clamp it to a large-but-finite hint first.
+export const MAX_RETRY_AFTER_MS = 24 * 60 * 60 * 1000; // 24h
+
+export function clampRetryAfterMs(retryAfterMs: number): number {
+  return Number.isFinite(retryAfterMs) ? retryAfterMs : MAX_RETRY_AFTER_MS;
+}

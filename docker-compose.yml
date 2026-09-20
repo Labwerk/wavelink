@@ -1,6 +1,17 @@
 services:
   backend:
-    image: ghcr.io/get-convex/convex-backend:latest
+    # Pinned to the digest `latest` resolved to as of 2026-09-20 (plan.md's
+    # Risks section: "latest is not reproducible"). Resolved via GHCR's
+    # manifest API (reachable even in network-restricted environments where
+    # the blob-storage CDN pkg-containers.githubusercontent.com is blocked):
+    #   TOKEN=$(curl -sS "https://ghcr.io/token?scope=repository:get-convex/convex-backend:pull" | jq -r .token)
+    #   curl -sS -H "Authorization: Bearer $TOKEN" \
+    #     -H "Accept: application/vnd.oci.image.index.v1+json" \
+    #     "https://ghcr.io/v2/get-convex/convex-backend/manifests/latest" -D - -o /dev/null \
+    #     | grep docker-content-digest
+    # To move to a newer release, re-run the above against the desired tag
+    # and update the digest below.
+    image: ghcr.io/get-convex/convex-backend@sha256:1b0dcd93a3d126400d16e256aea1106a2ee9538882dda545d2c979f28cff1483
     ports:
       - "3210:3210"
       - "3211:3211"

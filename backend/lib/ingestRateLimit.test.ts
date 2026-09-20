@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { applyTokenBucket, type TokenBucketConfig } from "./ingestRateLimit.ts";
+import {
+  applyTokenBucket,
+  clampRetryAfterMs,
+  MAX_RETRY_AFTER_MS,
+  type TokenBucketConfig,
+} from "./ingestRateLimit.ts";
 
 const config: TokenBucketConfig = { rate: 60, periodMs: 60_000, capacity: 10 }; // 1 token/sec, burst 10
 
@@ -80,6 +85,32 @@ test("a sender exceeding the configured rate is throttled (R21 acceptance)", () 
   }
   assert.equal(allowed, config.capacity);
   assert.equal(denied, 10);
+});
+
+test("a rate of 0 produces an Infinite retryAfter from applyTokenBucket", () => {
+  const disabled: TokenBucketConfig = { rate: 0, periodMs: 60_000, capacity: 10 };
+  const empty = { tokens: 0, lastRefillAt: 0 };
+  const result = applyTokenBucket(empty, disabled, 0, 1);
+  assert.equal(result.ok, false);
+  assert.equal(result.retryAfter, Infinity);
+});
+
+test("clampRetryAfterMs passes finite values through unchanged", () => {
+  assert.equal(clampRetryAfterMs(0), 0);
+  assert.equal(clampRetryAfterMs(1500), 1500);
+});
+
+test("clampRetryAfterMs clamps Infinity (and other non-finite values) to MAX_RETRY_AFTER_MS", () => {
+  assert.equal(clampRetryAfterMs(Infinity), MAX_RETRY_AFTER_MS);
+  assert.equal(clampRetryAfterMs(NaN), MAX_RETRY_AFTER_MS);
+  assert.equal(clampRetryAfterMs(-Infinity), MAX_RETRY_AFTER_MS);
+});
+
+test("clampRetryAfterMs output is always JSON- and header-safe", () => {
+  const clamped = clampRetryAfterMs(Infinity);
+  assert.equal(JSON.stringify({ retryAfterMs: clamped }), `{"retryAfterMs":${MAX_RETRY_AFTER_MS}}`);
+  assert.doesNotThrow(() => String(Math.ceil(clamped / 1000)));
+  assert.notEqual(String(Math.ceil(clamped / 1000)), "Infinity");
 });
 
 test("two independent buckets (two sourceIds) don't affect each other (R23)", () => {

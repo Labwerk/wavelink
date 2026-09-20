@@ -1,7 +1,9 @@
-import { httpAction } from "./_generated/server";
+import { httpAction, type ActionCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
+import type { FunctionArgs } from "convex/server";
 import { authenticateIngestRequest } from "./lib/ingestAuth";
 import { loadIngestConfig } from "./lib/ingestConfig";
+import { clampRetryAfterMs } from "./lib/ingestRateLimit";
 import { UNAUTHENTICATED_SOURCE } from "./ingestStats";
 
 // The httpAction pipeline for POST /ingest/readings (telemetry-ingestion R1).
@@ -28,10 +30,38 @@ function errorResponse(status: number, category: FailureCategory, retryAfterMs?:
   const body: Record<string, unknown> = { outcome: "error", category };
   const headers: Record<string, string> = { ...JSON_HEADERS };
   if (retryAfterMs !== undefined) {
-    body.retryAfterMs = retryAfterMs;
-    headers["Retry-After"] = String(Math.ceil(retryAfterMs / 1000));
+    // Clamped so a `*_PER_MINUTE` rate of 0 (retryAfter === Infinity) can
+    // never leak into the JSON body (where it would silently become `null`)
+    // or the Retry-After header (where `"Infinity"` is invalid) — see
+    // `clampRetryAfterMs`'s doc comment.
+    const clamped = clampRetryAfterMs(retryAfterMs);
+    body.retryAfterMs = clamped;
+    headers["Retry-After"] = String(Math.ceil(clamped / 1000));
   }
   return new Response(JSON.stringify(body), { status, headers });
+}
+
+/**
+ * Records ingestion stats (R25) without letting a failure there override the
+ * response the caller already earned. Stats are a secondary observability
+ * concern: if this write throws — e.g. under the per-minute counter
+ * contention the plan's Risks section names as a real possibility — the
+ * request's actual outcome (already accepted/rejected/rate-limited/etc.,
+ * and for the accepted path, already durably committed by
+ * `internal.ingest.recordBatch`) must still be returned as-is rather than
+ * surfacing as an unhandled exception from the httpAction.
+ */
+async function recordStatsBestEffort(
+  ctx: ActionCtx,
+  args: FunctionArgs<typeof internal.ingestStats.record>,
+): Promise<void> {
+  try {
+    await ctx.runMutation(internal.ingestStats.record, args);
+  } catch (err) {
+    console.warn(
+      JSON.stringify({ event: "ingest_stats_record_failed", ts: Date.now(), args, error: String(err) }),
+    );
+  }
 }
 
 export const ingestReadings = httpAction(async (ctx, request) => {
@@ -42,7 +72,7 @@ export const ingestReadings = httpAction(async (ctx, request) => {
   // token (R3). Nothing has been written yet.
   const auth = authenticateIngestRequest(request.headers.get("Authorization"), process.env.INGEST_TOKENS);
   if (!auth) {
-    await ctx.runMutation(internal.ingestStats.record, {
+    await recordStatsBestEffort(ctx, {
       sourceId: UNAUTHENTICATED_SOURCE,
       outcome: "credentialFailed",
     });
@@ -65,7 +95,7 @@ export const ingestReadings = httpAction(async (ctx, request) => {
     config: { rate: config.requestsPerMinute, periodMs: 60_000, capacity: config.requestBurst },
   });
   if (!requestLimit.ok) {
-    await ctx.runMutation(internal.ingestStats.record, { sourceId, outcome: "rateLimited" });
+    await recordStatsBestEffort(ctx, { sourceId, outcome: "rateLimited" });
     return errorResponse(429, "rate_limited", requestLimit.retryAfter);
   }
 
@@ -73,7 +103,7 @@ export const ingestReadings = httpAction(async (ctx, request) => {
   const bodyText = await request.text();
   const bodyBytes = new TextEncoder().encode(bodyText).length;
   if (bodyBytes > config.maxPayloadBytes) {
-    await ctx.runMutation(internal.ingestStats.record, { sourceId, outcome: "oversize" });
+    await recordStatsBestEffort(ctx, { sourceId, outcome: "oversize" });
     return errorResponse(413, "payload_too_large");
   }
 
@@ -81,21 +111,25 @@ export const ingestReadings = httpAction(async (ctx, request) => {
   try {
     parsedBody = JSON.parse(bodyText);
   } catch {
-    await ctx.runMutation(internal.ingestStats.record, { sourceId, outcome: "malformed" });
+    await recordStatsBestEffort(ctx, { sourceId, outcome: "malformed" });
     return errorResponse(400, "malformed_payload");
   }
   const readings =
     typeof parsedBody === "object" && parsedBody !== null && Array.isArray((parsedBody as { readings?: unknown }).readings)
       ? ((parsedBody as { readings: unknown[] }).readings)
       : null;
-  if (readings === null) {
-    await ctx.runMutation(internal.ingestStats.record, { sourceId, outcome: "malformed" });
+  if (readings === null || readings.length === 0) {
+    // A Batch is defined (spec.md's Terminology) as carrying "one or more
+    // readings" — an empty array isn't a batch at all, so it's rejected the
+    // same way an unparseable/missing `readings` array is, rather than
+    // succeeding with a vacuous `{submitted:0, stored:0, rejected:[]}`.
+    await recordStatsBestEffort(ctx, { sourceId, outcome: "malformed" });
     return errorResponse(400, "malformed_payload");
   }
 
   // 4. Enforce batch size (R18).
   if (readings.length > config.maxReadingsPerBatch) {
-    await ctx.runMutation(internal.ingestStats.record, { sourceId, outcome: "oversize" });
+    await recordStatsBestEffort(ctx, { sourceId, outcome: "oversize" });
     return errorResponse(413, "batch_too_large");
   }
 
@@ -106,7 +140,7 @@ export const ingestReadings = httpAction(async (ctx, request) => {
     config: { rate: config.readingsPerMinute, periodMs: 60_000, capacity: config.readingBurst },
   });
   if (!readingLimit.ok) {
-    await ctx.runMutation(internal.ingestStats.record, { sourceId, outcome: "rateLimited" });
+    await recordStatsBestEffort(ctx, { sourceId, outcome: "rateLimited" });
     return errorResponse(429, "rate_limited", readingLimit.retryAfter);
   }
 
@@ -129,7 +163,7 @@ export const ingestReadings = httpAction(async (ctx, request) => {
   for (const rejection of result.rejected) {
     rejectedByReason[rejection.reason] = (rejectedByReason[rejection.reason] ?? 0) + 1;
   }
-  await ctx.runMutation(internal.ingestStats.record, {
+  await recordStatsBestEffort(ctx, {
     sourceId,
     outcome: "accepted",
     readingsAccepted: result.stored,
