@@ -17,7 +17,8 @@ export default defineSchema({
     metadata: v.optional(v.record(v.string(), v.string())),
   })
     .index("by_externalId", ["externalId"])
-    .index("by_zone_and_status", ["zone", "status"]),
+    .index("by_zone_and_status", ["zone", "status"])
+    .index("by_isActive", ["isActive"]),
 
   telemetry: defineTable({
     deviceId: v.id("devices"),

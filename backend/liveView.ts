@@ -33,10 +33,13 @@ export const overview = query({
   handler: async (ctx) => {
     await requireAuth(ctx);
 
+    // Indexed on isActive directly (schema.ts: "by_isActive") rather than
+    // scanning by_zone_and_status and filtering post-hoc — R7's zone/status
+    // filtering happens client-side over this one subscribed list, so no
+    // index ordering on those fields is needed here.
     const devices = await ctx.db
       .query("devices")
-      .withIndex("by_zone_and_status")
-      .filter((q) => q.eq(q.field("isActive"), true))
+      .withIndex("by_isActive", (q) => q.eq("isActive", true))
       .take(MAX_OVERVIEW_DEVICES);
 
     return Promise.all(
