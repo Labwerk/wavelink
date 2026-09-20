@@ -1,7 +1,7 @@
 ---
 name: planner
 description: MUST BE USED after a spec exists. Reads spec.md and produces a technical plan, researching the web for current best practices, library versions and tradeoffs. Produces plan.md — no code.
-tools: Read, Write, Edit, Glob, Grep, WebSearch, WebFetch, SendMessage
+tools: Read, Write, Edit, Glob, Grep, WebSearch, WebFetch
 model: opus
 # skills:
 #   - sdd-plan
