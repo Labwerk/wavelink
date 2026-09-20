@@ -25,15 +25,18 @@ Read this first — these resolve the spec's open questions and one cross-featur
 5. **Event log (R4)** = the device's last 50 raw `telemetry` rows (newest first) plus
    client-derived "gap" markers where consecutive readings are further apart than the
    staleness threshold. Explicitly reads nothing from `alerts`/`alertRules`.
-6. **R8 ships behind a thin `requireAuth(ctx)` stub; `auth-roles` lands later.**
-   *Decision 2026-09-20:* build this feature **now**, ahead of `auth-roles`. The builder
-   lands `backend/lib/auth.ts` with a thin `requireAuth(ctx)` — a
-   `ctx.auth.getUserIdentity()` check throwing the uniform opaque error — matching the
-   signature `specs/auth-roles/plan.md` specifies, and calls it first in every
-   `liveView.*` query. `auth-roles` later replaces the body (role lookup via
-   `getAuthUserId`) without touching any call site. **The reviewer marks R8 `Blocked`,
-   not `Met`**, until a real session mechanism exists to test against. This feature still
-   does not choose or build an auth mechanism.
+6. **R8 is fully enforced via `auth-roles`, which has since landed.** *Updated
+   2026-09-20 (post-merge):* this feature originally shipped behind a thin
+   `requireAuth(ctx)` stub — a bare `ctx.auth.getUserIdentity()` check — ahead of
+   `auth-roles`, with the reviewer instructed to mark R8 `Blocked`. `auth-roles` has since
+   merged into `main` and was synced into this branch; every `liveView.*` query now goes
+   through `authedQuery` (`backend/lib/functions.ts`) requiring the `data.read`
+   capability — held by every role (viewer and up) — via `requireCapability`
+   (`backend/lib/auth.ts`). The stub and its file are gone; call sites changed shape only
+   at the wrapper (`query({...})` → `authedQuery({ capability: "data.read", ... })`), not
+   in the guard's *position* (still the first thing every query does). **R8 is now
+   `Met`, not `Blocked`** — see the updated coverage row below. This feature still did
+   not choose or build the auth mechanism itself; it only consumes it.
 
 ---
 
@@ -48,9 +51,9 @@ Read this first — these resolve the spec's open questions and one cross-featur
     NOT user auth)       │              ▼         lastSeenAt)        │
                          │        ┌─────────────────────────┐        │
                          │        │ backend/liveView.ts     │        │
-                         │        │  · overview             │◀── requireAuth(ctx)
-                         │        │  · deviceSnapshot       │     (auth-roles)
-                         │        │  · recentEvents         │        │
+                         │        │  · overview             │◀── authedQuery
+                         │        │  · deviceSnapshot       │   ("data.read",
+                         │        │  · recentEvents         │    auth-roles)
                          │        └─────────┬───────────────┘        │
                          │   reads via      │  backend/lib/          │
                          │   by_device_metric_and_ts, by_device_and_ts│
@@ -112,7 +115,7 @@ even though by definition no write happens when a device goes quiet.
 | Overview at scale | Plain DOM rows, server read bounded to 500 devices, "showing first N" notice past the cap | Spec'd ceiling is low hundreds; virtualization is measurable complexity for a problem the deployment doesn't have yet. The cap prevents an unbounded read regression. | `react-window`/virtualization now — new dependency, harder to test, premature |
 | Styling | CSS Modules (built into Next.js) for the new components | The app currently uses ad-hoc inline styles; a growing component set needs real class-based styling for the stale treatment, and CSS Modules ship with the framework. | Tailwind (new toolchain + config + build step) or CSS-in-JS (runtime cost, RSC friction) |
 | Stale affordance | Badge with **text** ("Stale · 4m ago") + muted metric values + an icon — not colour alone | R6 says "visually distinguished"; colour-only fails for colour-blind operators and is untestable by text assertion. Text makes the acceptance check straightforward. | Red text / red border only |
-| Auth gating (R8) | `requireAuth(ctx)` from `backend/lib/auth.ts` (auth-roles) as the first statement of every `liveView.*` query, plus the auth-roles route gate | Server-side enforcement on the data path is the only thing that actually satisfies "no telemetry reaches an unauthenticated request"; route gating alone can be bypassed by calling the query directly. | Route/middleware gating only, or a client-side redirect — both leave the query callable |
+| Auth gating (R8) | `authedQuery({ capability: "data.read", ... })` (`backend/lib/functions.ts`, auth-roles) wrapping every `liveView.*` query, plus the auth-roles route gate (`frontend/proxy.ts`) | Server-side enforcement on the data path is the only thing that actually satisfies "no telemetry reaches an unauthenticated request"; route gating alone can be bypassed by calling the query directly. `data.read` is the minimum-role capability (every role holds it), matching R8's "any authenticated user" requirement exactly. | Route/middleware gating only, or a client-side redirect — both leave the query callable; a bespoke `requireAuth` stub — superseded once auth-roles landed |
 
 ---
 
@@ -129,7 +132,9 @@ read from tables the registry and ingestion features already own.
 | `telemetry` | `_id`, `deviceId`, `ts`, `metric`, `value` | Latest-per-metric via `by_device_metric_and_ts` desc `.take(1)`; event log via `by_device_and_ts` desc `.take(limit)`. |
 
 **Never read by this feature:** `alerts`, `alertRules` — R4 requires the event log be
-distinct from alert history. `users` is read only indirectly, inside `requireAuth`.
+distinct from alert history. `users` is read only indirectly, inside `requireCapability`
+(auth-roles' `backend/lib/auth.ts`), to resolve the caller's role for the `data.read`
+capability check.
 
 ### Configuration (code constants, not stored data)
 
@@ -195,9 +200,9 @@ value rather than silently disappearing.
 
 | Function | Type | Args | Guard | Requirement |
 |---|---|---|---|---|
-| `liveView.overview` | query (subscribed) | — | `requireAuth` | R1, R2, R5, R6, R7, R8 |
-| `liveView.deviceSnapshot` | query (subscribed) | `deviceId` | `requireAuth` | R3, R5, R6, R8 |
-| `liveView.recentEvents` | query (subscribed) | `deviceId`, `limit?` (default 50, max 200) | `requireAuth` | R4, R5, R8 |
+| `liveView.overview` | authed query (subscribed) | — | `authedQuery`, capability `data.read` | R1, R2, R5, R6, R7, R8 |
+| `liveView.deviceSnapshot` | authed query (subscribed) | `deviceId` | `authedQuery`, capability `data.read` | R3, R5, R6, R8 |
+| `liveView.recentEvents` | authed query (subscribed) | `deviceId`, `limit?` (default 50, max 200) | `authedQuery`, capability `data.read` | R4, R5, R8 |
 
 Existing functions: `devices.listActive`, `devices.get`, `telemetry.latestForDevice` stay
 as they are (other features and `specs/foundation/plan.md` §10 reference them). The
@@ -218,21 +223,19 @@ place rather than being duplicated.
 | **R5** — automatic updates, no refresh/poll | All three queries are plain Convex `useQuery` subscriptions. Convex tracks each query's read set and pushes a new result over the existing WebSocket when a document in it changes; `ingest.recordBatch` writes a `telemetry` row *and* patches `devices.lastSeenAt`, both of which are in the read sets above. No `setInterval` refetch, no `router.refresh()`, no revalidation anywhere in the feature. |
 | **R6** — stale visually distinguished, overview **and** detail | `frontend/lib/useNow.ts` (one module-level 1 s interval, shared via `useSyncExternalStore`) + `frontend/lib/freshness.ts` pure classifier, using the `expectedIntervalMs` each query returns. Consumed by `DeviceCard` (overview) and `DeviceHeader`/`MetricTable` (detail) so the treatment is identical in both places: text badge ("Stale · 4m ago") + icon + muted metric values, never colour alone. Because the tick is client-side, a device that simply goes quiet flips to stale with no write and no server work. |
 | **R7** — filter/group by zone, type, status | `FilterBar` + `DeviceGrid` filter and group the already-subscribed `overview` array client-side; selections are mirrored into URL search params (`?zone=&type=&status=&groupBy=`) so a filtered view is shareable and survives reload. Clearing a filter restores the full list because the underlying subscription is never re-scoped. Fields are exactly the three foundation §6.1 req. 4 names for the device list (`zone`, `type`, `status`) — see the R7 note under "Risks". |
-| **R8** — authenticated session required, no data to unauthenticated requests | Every `liveView.*` query calls `requireAuth(ctx)` from `backend/lib/auth.ts` as its first statement and throws the uniform opaque error on failure (`specs/auth-roles/plan.md`), so a direct query call with no session returns no device or telemetry data. The routes `/` and `/devices/[deviceId]` additionally sit behind auth-roles' route gate. This feature adds no unauthenticated read path. **Status: `Blocked`, not `Met`** — per the 2026-09-20 decision this ships ahead of `auth-roles`, so the guard is in place and audited but cannot be verified end-to-end until a real session mechanism exists. The reviewer should record it that way rather than passing or failing it. |
+| **R8** — authenticated session required, no data to unauthenticated requests | Every `liveView.*` query is wrapped in `authedQuery({ capability: "data.read", ... })` (`backend/lib/functions.ts`), which resolves the caller via `getAuthUserId`/`requireCapability` (`backend/lib/auth.ts`) and throws the uniform opaque `NOT_AUTHORIZED` error before the handler runs — an unauthenticated or deactivated caller gets no device or telemetry data. The routes `/` and `/devices/[deviceId]` additionally sit behind auth-roles' route gate (`frontend/proxy.ts`). This feature adds no unauthenticated read path. **Status: `Met`** — updated 2026-09-20 after `auth-roles` merged into this branch and the `requireAuth` stub was replaced with the real guard; `backend/liveView.test.ts` now authenticates through `tests/testUtils.ts`'s `createUserFixture` (a real `users` row + Convex Auth identity) instead of a fake identity, and asserts the `NOT_AUTHORIZED` denial. |
 
 ---
 
 ## Risks & unknowns
 
-- **R8 cannot be verified in this feature's own review.** `auth-roles` is planned but not
-  built — `backend/lib/auth.ts` does not exist and `backend/devices.ts` still carries its
-  `TODO(M2)` — and the 2026-09-20 decision is to build the live view first anyway.
-  *Mitigation:* the thin `requireAuth(ctx)` stub goes in now at every `liveView.*` call
-  site, so the guard is structurally present and auditable by reading the file; the
-  reviewer records R8 as `Blocked`. **The residual risk is that the stub is later
-  softened or bypassed instead of being filled in** — so `auth-roles`' own review must
-  re-verify R8 of *this* spec once it lands, and the guard must never be quietly dropped
-  to make a test pass in the meantime.
+- **Resolved 2026-09-20: R8 is fully verified.** `auth-roles` has landed on `main` and was
+  merged into this branch. The `requireAuth(ctx)` stub is gone; every `liveView.*` query
+  now runs through the real `authedQuery`/`requireCapability` guard (`data.read`
+  capability), and `backend/liveView.test.ts` authenticates through
+  `tests/testUtils.ts`'s `createUserFixture` — a real `users` row plus a Convex Auth
+  identity, not a fake one. No residual risk remains here; this bullet is kept for
+  history rather than deleted outright.
 - **Next.js 16 + React 18 mismatch.** The repo runs `next@16.3.1` with `react@18.3.1`
   (lockfile), but Next 16's own upgrade guide states Next 16 requires React 19.2
   ([version-16.mdx](https://github.com/vercel/next.js/blob/canary/docs/01-app/02-guides/upgrading/version-16.mdx)).
@@ -241,10 +244,12 @@ place rather than being duplicated.
   `node_modules/next/dist/docs/` after `npm install` before writing any frontend code.
   If a needed API requires React 19, **stop and escalate** rather than bumping React:
   that upgrade is cross-cutting and also affects auth-roles.
-- **`middleware.ts` is renamed to `proxy.ts` in Next 16** (edge runtime unsupported;
-  Node runtime only), per the same upgrade guide. `specs/auth-roles/plan.md` still says
-  `frontend/middleware.ts`. R8's route gate must use the Next 16 name. *Mitigation:*
-  flagged to the builder; auth-roles' plan should be corrected when it is next touched.
+- **Resolved 2026-09-20: `middleware.ts` → `proxy.ts` was correctly handled.** Next 16
+  renamed `middleware.ts` to `proxy.ts` (edge runtime unsupported; Node runtime only).
+  This was flagged as a risk against `specs/auth-roles/plan.md`'s stale naming before
+  that feature landed; the merged `frontend/proxy.ts` confirms auth-roles used the
+  correct Next 16 name in the actual implementation (its own `plan.md`'s naming may still
+  be stale — out of scope for this spec to fix).
 - **Devices never transition back to `offline`.** `ingest.recordBatch` only ever sets
   `status: "online"`; nothing flips a silent device to `offline`. So R1's stored status
   is truthful but practically always "online", and the *operator-visible* signal for a
@@ -337,16 +342,23 @@ Three lines, as required:
    (key metrics per type, 10 s expected interval × 3 = 30 s stale with a per-device
    `metadata` override, a 50-entry telemetry-derived event log, and no virtualization
    below 500 devices) — each a one-constant change if the team disagrees.
-3. The load-bearing assumptions are that the `requireAuth` stub is genuinely filled in
-   when `auth-roles` lands (R8, tracked as `Blocked` until then) and that
-   device-supplied timestamps are roughly clock-synced with the browser (R6).
+3. The remaining load-bearing assumption is that device-supplied timestamps are roughly
+   clock-synced with the browser (R6). The other assumption this section originally
+   listed — that the `requireAuth` stub would genuinely be filled in when `auth-roles`
+   landed — has been resolved: `auth-roles` merged into `main` on 2026-09-20 and was
+   synced into this branch, replacing the stub with the real `authedQuery`/
+   `requireCapability` guard. **R8 is `Met`.**
 
 **Decisions confirmed 2026-09-20 — none outstanding, the builder is clear to start:**
 
-- **R8 sequencing.** Build the live view **now**, ahead of `auth-roles`. Thin
-  `requireAuth(ctx)` stub at every `liveView.*` call site against auth-roles' agreed
-  signature; reviewer marks R8 `Blocked`, not `Met`. Carried into Decision summary §6,
-  the R8 coverage row, and the first risk bullet.
+- **R8 sequencing — superseded 2026-09-20 (post-merge).** The live view shipped first,
+  ahead of `auth-roles`, exactly as planned: a thin `requireAuth(ctx)` stub sat at every
+  `liveView.*` call site against auth-roles' agreed signature, and the reviewer correctly
+  marked R8 `Blocked`, not `Met`, in the first review round. `auth-roles` has since
+  landed and was merged into this branch; the stub is gone, replaced by the real
+  `authedQuery({ capability: "data.read", ... })` guard, and R8 is now `Met`. Carried
+  into Decision summary §6, the R8 coverage row, and the first risk bullet, all updated
+  above.
 - **Staleness threshold.** 10 s expected reporting interval × 3 = **30 s**, with
   `devices.metadata.expectedIntervalMs` as the per-device override. Proceed with these
   defaults. Still a one-constant change in `EXPECTED_INTERVAL_MS_BY_TYPE` if real device
