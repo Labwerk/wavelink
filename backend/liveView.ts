@@ -1,6 +1,5 @@
 import { v } from "convex/values";
-import { query } from "./_generated/server";
-import { requireAuth } from "./lib/auth";
+import { authedQuery } from "./lib/functions";
 import { keyMetricsForType } from "./lib/keyMetrics";
 import { expectedIntervalMsFor } from "./lib/freshness";
 import { resolveLatestMetrics } from "./lib/latestMetrics";
@@ -27,12 +26,14 @@ const MAX_EVENT_LOG_LIMIT = 200;
  * status and last-seen timestamp verbatim from storage, plus its resolved
  * key metrics and staleness threshold. Filtering/grouping (R7) happens
  * client-side over this one subscribed list.
+ *
+ * Role matrix (spec `specs/auth-roles/spec.md` "Users & roles"): reading the
+ * live view needs `data.read`, which every role holds (R8).
  */
-export const overview = query({
+export const overview = authedQuery({
+  capability: "data.read",
   args: {},
   handler: async (ctx) => {
-    await requireAuth(ctx);
-
     // Indexed on isActive directly (schema.ts: "by_isActive") rather than
     // scanning by_zone_and_status and filtering post-hoc — R7's zone/status
     // filtering happens client-side over this one subscribed list, so no
@@ -72,11 +73,10 @@ export const overview = query({
  * (isActive: false) still renders here, labelled, rather than 404ing — it
  * just never appears in `overview`'s list.
  */
-export const deviceSnapshot = query({
+export const deviceSnapshot = authedQuery({
+  capability: "data.read",
   args: { deviceId: v.id("devices") },
   handler: async (ctx, { deviceId }) => {
-    await requireAuth(ctx);
-
     const device = await ctx.db.get(deviceId);
     if (!device) {
       return null;
@@ -119,11 +119,10 @@ export const deviceSnapshot = query({
  * or `alertRules` — "recent event log" here is device/telemetry activity,
  * not alert history (an explicit non-goal in spec.md).
  */
-export const recentEvents = query({
+export const recentEvents = authedQuery({
+  capability: "data.read",
   args: { deviceId: v.id("devices"), limit: v.optional(v.number()) },
   handler: async (ctx, { deviceId, limit }) => {
-    await requireAuth(ctx);
-
     const take = Math.min(Math.max(limit ?? DEFAULT_EVENT_LOG_LIMIT, 1), MAX_EVENT_LOG_LIMIT);
 
     const rows = await ctx.db

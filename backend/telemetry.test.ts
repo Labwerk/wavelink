@@ -1,6 +1,16 @@
 import { describe, expect, test } from "vitest";
 import { setupTest } from "./testUtils";
 import { api } from "./_generated/api";
+import { createUserFixture } from "../tests/testUtils";
+
+// Auth behavior (unauthenticated/per-role) for `telemetry.latestForDevice`
+// is covered by tests/devices.test.ts; this file only exercises the
+// latest-per-metric reduction, so it just needs any authenticated caller —
+// `data.read` is held by every role (backend/lib/permissions.ts).
+async function authed(t: ReturnType<typeof setupTest>) {
+  const { as } = await createUserFixture(t, "viewer");
+  return as;
+}
 
 async function seedDevice(t: ReturnType<typeof setupTest>) {
   return t.run((ctx) =>
@@ -40,7 +50,7 @@ describe("telemetry.latestForDevice", () => {
       });
     });
 
-    const readings = await t.query(api.telemetry.latestForDevice, { deviceId });
+    const readings = await (await authed(t)).query(api.telemetry.latestForDevice, { deviceId });
     const byMetric = Object.fromEntries(readings.map((r) => [r.metric, r]));
 
     expect(readings).toHaveLength(2);
@@ -53,7 +63,7 @@ describe("telemetry.latestForDevice", () => {
     const t = setupTest();
     const deviceId = await seedDevice(t);
 
-    const readings = await t.query(api.telemetry.latestForDevice, { deviceId });
+    const readings = await (await authed(t)).query(api.telemetry.latestForDevice, { deviceId });
     expect(readings).toEqual([]);
   });
 });

@@ -1,8 +1,11 @@
 import { v } from "convex/values";
-import { query } from "./_generated/server";
+import { authedQuery } from "./lib/functions";
 import { latestByMetric } from "./lib/latestMetrics";
 
-export const latestForDevice = query({
+// Role matrix (spec `specs/auth-roles/spec.md` "Users & roles"): reading
+// telemetry needs `data.read`, which every role holds.
+export const latestForDevice = authedQuery({
+  capability: "data.read",
   args: { deviceId: v.id("devices") },
   handler: async (ctx, { deviceId }) => {
     const rows = await ctx.db

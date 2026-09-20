@@ -1,23 +1,59 @@
-import type { MutationCtx, QueryCtx } from "../_generated/server";
-
-// Thin stand-in for auth-roles' `requireAuth` (specs/auth-roles/plan.md,
-// backend/lib/auth.ts). auth-roles has not shipped yet — there is no `users`
-// table wiring or role resolution on the server. This only confirms Convex
-// sees an authenticated identity for the caller, deny-by-default otherwise,
-// so R8 ("no telemetry or device state is shown to an unauthenticated
-// request") is already enforced at the query layer. Every `liveView.*` query
-// calls this first; once auth-roles lands, this gets replaced by the real
-// `requireAuth` (which additionally resolves the caller's `users` role) and
-// call sites don't change shape.
+// Shared server-side authorization (spec R1, R3, R4, R6).
 //
-// specs/live-telemetry-view/tasks.md "Deviations from plan" notes why this
-// exists ahead of auth-roles, and specs/live-telemetry-view/plan.md's "Risks
-// & unknowns" says the reviewer should mark R8 as blocked (not met) until
-// auth-roles actually ships the full guard.
-export async function requireAuth(ctx: QueryCtx | MutationCtx) {
-  const identity = await ctx.auth.getUserIdentity();
-  if (identity === null) {
-    throw new Error("Not authenticated");
+// The caller is resolved from the authenticated identity
+// (`getAuthUserId` -> `users._id`) and the role is read from the stored row
+// on every call - never from a token claim or a client-supplied value (R3).
+// Every denial path throws the same opaque error, so unauthenticated,
+// wrong-role, deactivated and unknown-capability callers are
+// indistinguishable (R6).
+
+import { getAuthUserId } from "@convex-dev/auth/server";
+import type { Doc, Id } from "../_generated/dataModel";
+import type { MutationCtx, QueryCtx } from "../_generated/server";
+import { roleHasCapability } from "./permissions";
+
+export type { Role, Capability } from "./permissions";
+
+/** Generic, fail-closed message. Never vary this by denial reason (R6). */
+export const NOT_AUTHORIZED = "Not authorized";
+
+/**
+ * Resolves the calling user's row, or `null` when unauthenticated or the row
+ * is missing. Does not check `isActive` or role.
+ */
+export async function getCurrentUser(
+  ctx: QueryCtx | MutationCtx,
+): Promise<Doc<"users"> | null> {
+  const userId = await getAuthUserId(ctx);
+  if (userId === null) {
+    return null;
   }
-  return identity;
+  return ctx.db.get(userId);
+}
+
+/**
+ * Loads `userId`'s row and requires it to be active and to hold
+ * `capability`. Deny-by-default: an unknown capability denies everyone.
+ */
+export async function requireCapabilityForUser(
+  ctx: QueryCtx | MutationCtx,
+  userId: Id<"users"> | null,
+  capability: string,
+): Promise<Doc<"users">> {
+  if (userId === null) {
+    throw new Error(NOT_AUTHORIZED);
+  }
+  const user = await ctx.db.get(userId);
+  if (user === null || !user.isActive || !roleHasCapability(user.role, capability)) {
+    throw new Error(NOT_AUTHORIZED);
+  }
+  return user;
+}
+
+/** Requires the authenticated caller to hold `capability`; returns their row. */
+export async function requireCapability(
+  ctx: QueryCtx | MutationCtx,
+  capability: string,
+): Promise<Doc<"users">> {
+  return requireCapabilityForUser(ctx, await getAuthUserId(ctx), capability);
 }

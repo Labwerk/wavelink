@@ -1,9 +1,14 @@
 import { describe, expect, test } from "vitest";
 import { setupTest } from "./testUtils";
 import { api } from "./_generated/api";
+import { NOT_AUTHORIZED } from "./lib/auth";
+import { createUserFixture } from "../tests/testUtils";
 
-function authed(t: ReturnType<typeof setupTest>) {
-  return t.withIdentity({ subject: "user-1" });
+// `data.read` is the minimum-role capability every `liveView.*` query
+// requires (viewer and up) — see backend/lib/permissions.ts.
+async function authed(t: ReturnType<typeof setupTest>) {
+  const { as } = await createUserFixture(t, "viewer");
+  return as;
 }
 
 async function seedDevice(
@@ -36,7 +41,7 @@ async function seedDevice(
 describe("liveView.overview", () => {
   test("throws for an unauthenticated caller (R8)", async () => {
     const t = setupTest();
-    await expect(t.query(api.liveView.overview, {})).rejects.toThrow(/not authenticated/i);
+    await expect(t.query(api.liveView.overview, {})).rejects.toThrow(NOT_AUTHORIZED);
   });
 
   test("shows status/lastSeenAt verbatim and resolved key metrics for active devices (R1, R2)", async () => {
@@ -61,7 +66,7 @@ describe("liveView.overview", () => {
       });
     });
 
-    const rows = await authed(t).query(api.liveView.overview, {});
+    const rows = await (await authed(t)).query(api.liveView.overview, {});
     expect(rows).toHaveLength(1);
     const row = rows[0];
     expect(row.status).toBe("online");
@@ -83,7 +88,7 @@ describe("liveView.overview", () => {
     await seedDevice(t, { externalId: "active-1", isActive: true });
     await seedDevice(t, { externalId: "gone-1", isActive: false });
 
-    const rows = await authed(t).query(api.liveView.overview, {});
+    const rows = await (await authed(t)).query(api.liveView.overview, {});
     expect(rows.map((r: { externalId: string }) => r.externalId)).toEqual(["active-1"]);
   });
 
@@ -91,7 +96,7 @@ describe("liveView.overview", () => {
     const t = setupTest();
     await seedDevice(t, { metadata: { expectedIntervalMs: "60000" } });
 
-    const rows = await authed(t).query(api.liveView.overview, {});
+    const rows = await (await authed(t)).query(api.liveView.overview, {});
     expect(rows[0].expectedIntervalMs).toBe(60_000);
   });
 });
@@ -101,7 +106,7 @@ describe("liveView.deviceSnapshot", () => {
     const t = setupTest();
     const deviceId = await seedDevice(t);
     await expect(t.query(api.liveView.deviceSnapshot, { deviceId })).rejects.toThrow(
-      /not authenticated/i,
+      NOT_AUTHORIZED,
     );
   });
 
@@ -110,7 +115,7 @@ describe("liveView.deviceSnapshot", () => {
     const deviceId = await seedDevice(t);
     await t.run((ctx) => ctx.db.delete(deviceId));
 
-    const snapshot = await authed(t).query(api.liveView.deviceSnapshot, { deviceId });
+    const snapshot = await (await authed(t)).query(api.liveView.deviceSnapshot, { deviceId });
     expect(snapshot).toBeNull();
   });
 
@@ -133,7 +138,7 @@ describe("liveView.deviceSnapshot", () => {
       });
     });
 
-    const snapshot = await authed(t).query(api.liveView.deviceSnapshot, { deviceId });
+    const snapshot = await (await authed(t)).query(api.liveView.deviceSnapshot, { deviceId });
     const metricNames = snapshot!.metrics.map((m: { metric: string }) => m.metric).sort();
     expect(metricNames).toEqual(
       ["cycle_count", "error_code", "temperature_c", "vibration_mm_s"].sort(),
@@ -148,7 +153,7 @@ describe("liveView.deviceSnapshot", () => {
     const t = setupTest();
     const deviceId = await seedDevice(t, { isActive: false });
 
-    const snapshot = await authed(t).query(api.liveView.deviceSnapshot, { deviceId });
+    const snapshot = await (await authed(t)).query(api.liveView.deviceSnapshot, { deviceId });
     expect(snapshot).not.toBeNull();
     expect(snapshot!.device.isActive).toBe(false);
   });
@@ -159,7 +164,7 @@ describe("liveView.recentEvents", () => {
     const t = setupTest();
     const deviceId = await seedDevice(t);
     await expect(t.query(api.liveView.recentEvents, { deviceId })).rejects.toThrow(
-      /not authenticated/i,
+      NOT_AUTHORIZED,
     );
   });
 
@@ -177,7 +182,7 @@ describe("liveView.recentEvents", () => {
       }
     });
 
-    const events = await authed(t).query(api.liveView.recentEvents, { deviceId, limit: 3 });
+    const events = await (await authed(t)).query(api.liveView.recentEvents, { deviceId, limit: 3 });
     expect(events.map((e: { ts: number }) => e.ts)).toEqual([40, 30, 20]);
   });
 
@@ -188,7 +193,7 @@ describe("liveView.recentEvents", () => {
       ctx.db.insert("telemetry", { deviceId, ts: 1, metric: "temperature_c", value: 1 }),
     );
 
-    const events = await authed(t).query(api.liveView.recentEvents, { deviceId });
+    const events = await (await authed(t)).query(api.liveView.recentEvents, { deviceId });
     expect(events).toHaveLength(1);
     // Shape assertion backing the "reads only telemetry" claim: every key on
     // every returned entry is one of the telemetry-row fields this function

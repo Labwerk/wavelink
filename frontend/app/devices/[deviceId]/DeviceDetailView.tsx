@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../../backend/_generated/api";
 import type { Id } from "../../../../backend/_generated/dataModel";
 import { useNow } from "../../../lib/useNow";
@@ -19,6 +19,8 @@ import styles from "./DeviceDetailView.module.css";
 export function DeviceDetailView({ deviceId }: { deviceId: Id<"devices"> }) {
   const snapshot = useQuery(api.liveView.deviceSnapshot, { deviceId });
   const events = useQuery(api.liveView.recentEvents, { deviceId });
+  const me = useQuery(api.users.me);
+  const deactivate = useMutation(api.devices.deactivate);
   const now = useNow();
 
   if (snapshot === undefined) {
@@ -61,6 +63,13 @@ export function DeviceDetailView({ deviceId }: { deviceId: Id<"devices"> }) {
         <p className={styles.staleBadge}>
           ⚠ {freshness === "never" ? "Never reported" : "Stale"}
         </p>
+      )}
+      {/* Needs `device.manage` (admin) - the mutation re-checks server-side.
+          Out of scope for this feature (device registry owns it), ported
+          here from the pre-live-telemetry-view dashboard so deactivating a
+          device isn't only reachable by editing the database directly. */}
+      {device.isActive && me?.capabilities.includes("device.manage") && (
+        <button onClick={() => void deactivate({ deviceId })}>Deactivate (admin)</button>
       )}
 
       <h2>Metrics</h2>

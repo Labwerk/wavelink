@@ -7,7 +7,13 @@
    */
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "types": ["vite/client"]
+    // "node" alongside "vite/client": setting `types` explicitly drops
+    // the default auto-inclusion of every `@types/*` package, and test
+    // files transitively reach backend/lib/provisioning.ts's
+    // `process.env` via `./_generated/api`'s per-module type imports
+    // (real Convex codegen shapes `api.ts` the same way, so this isn't
+    // specific to the hand-reproduced copy here).
+    "types": ["vite/client", "node"]
   },
   "include": ["./**/*.test.ts", "./testUtils.ts"],
   "exclude": ["./_generated"]

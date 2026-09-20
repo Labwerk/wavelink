@@ -1,7 +1,17 @@
+import { authTables } from "@convex-dev/auth/server";
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { roleValidator } from "./lib/permissions";
 
 export default defineSchema({
+  // Convex Auth's own tables (authSessions, authAccounts, authRefreshTokens,
+  // authVerificationCodes, authVerifiers, authRateLimits). Its default
+  // `users` table is intentionally overridden below with our own shape
+  // (see `specs/auth-roles/plan.md`, Data model): our `createOrUpdateUser`
+  // callback in `backend/auth.ts` owns user-row creation, so none of
+  // Convex Auth's default `users` fields are required.
+  ...authTables,
+
   devices: defineTable({
     externalId: v.string(),
     name: v.string(),
@@ -63,18 +73,35 @@ export default defineSchema({
     .index("by_device_and_status", ["deviceId", "status"])
     .index("by_status_and_triggeredAt", ["status", "triggeredAt"]),
 
+  // Identity + exactly one role (R2). The row's own `_id` is the identity
+  // (`getAuthUserId`); `role` is written only by the creation callback in
+  // `auth.ts` (via `lib/provisioning.ts`: "viewer", or "admin" on the
+  // self-derived first-admin bootstrap) and by `users.setRole`.
   users: defineTable({
-    authId: v.string(),
-    name: v.string(),
     email: v.string(),
-    role: v.union(
-      v.literal("viewer"),
-      v.literal("operator"),
-      v.literal("maintenance"),
-      v.literal("admin"),
-    ),
+    name: v.string(),
+    role: roleValidator,
     isActive: v.boolean(),
+    // The admin who provisioned this account, validated inside the creation
+    // transaction. Absent for the bootstrap admin.
+    createdBy: v.optional(v.id("users")),
   })
-    .index("by_authId", ["authId"])
+    .index("by_email", ["email"])
     .index("by_role", ["role"]),
+
+  // Attribution (R11): appended in the same mutation as every state change.
+  auditLog: defineTable({
+    // Always the authenticated user who acted. Absent ONLY for break-glass
+    // operations run with the deployment admin key, which have no user
+    // (currently `user.setPassword`); those rows carry `details.via`.
+    actorId: v.optional(v.id("users")),
+    action: v.string(),
+    targetTable: v.optional(v.string()),
+    targetId: v.optional(v.string()),
+    details: v.optional(v.record(v.string(), v.string())),
+    at: v.number(),
+  })
+    .index("by_at", ["at"])
+    .index("by_actor_and_at", ["actorId", "at"])
+    .index("by_target", ["targetTable", "targetId", "at"]),
 });
