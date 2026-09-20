@@ -25,10 +25,15 @@ Read this first — these resolve the spec's open questions and one cross-featur
 5. **Event log (R4)** = the device's last 50 raw `telemetry` rows (newest first) plus
    client-derived "gap" markers where consecutive readings are further apart than the
    staleness threshold. Explicitly reads nothing from `alerts`/`alertRules`.
-6. **R8 depends on `auth-roles` landing first.** This feature consumes
-   `requireAuth(ctx)` from `backend/lib/auth.ts` (specified in
-   `specs/auth-roles/plan.md`) and sits behind that feature's route gate. It does not
-   choose or build an auth mechanism. **Sequencing decision needed** (see end).
+6. **R8 ships behind a thin `requireAuth(ctx)` stub; `auth-roles` lands later.**
+   *Decision 2026-09-20:* build this feature **now**, ahead of `auth-roles`. The builder
+   lands `backend/lib/auth.ts` with a thin `requireAuth(ctx)` — a
+   `ctx.auth.getUserIdentity()` check throwing the uniform opaque error — matching the
+   signature `specs/auth-roles/plan.md` specifies, and calls it first in every
+   `liveView.*` query. `auth-roles` later replaces the body (role lookup via
+   `getAuthUserId`) without touching any call site. **The reviewer marks R8 `Blocked`,
+   not `Met`**, until a real session mechanism exists to test against. This feature still
+   does not choose or build an auth mechanism.
 
 ---
 
@@ -213,19 +218,21 @@ place rather than being duplicated.
 | **R5** — automatic updates, no refresh/poll | All three queries are plain Convex `useQuery` subscriptions. Convex tracks each query's read set and pushes a new result over the existing WebSocket when a document in it changes; `ingest.recordBatch` writes a `telemetry` row *and* patches `devices.lastSeenAt`, both of which are in the read sets above. No `setInterval` refetch, no `router.refresh()`, no revalidation anywhere in the feature. |
 | **R6** — stale visually distinguished, overview **and** detail | `frontend/lib/useNow.ts` (one module-level 1 s interval, shared via `useSyncExternalStore`) + `frontend/lib/freshness.ts` pure classifier, using the `expectedIntervalMs` each query returns. Consumed by `DeviceCard` (overview) and `DeviceHeader`/`MetricTable` (detail) so the treatment is identical in both places: text badge ("Stale · 4m ago") + icon + muted metric values, never colour alone. Because the tick is client-side, a device that simply goes quiet flips to stale with no write and no server work. |
 | **R7** — filter/group by zone, type, status | `FilterBar` + `DeviceGrid` filter and group the already-subscribed `overview` array client-side; selections are mirrored into URL search params (`?zone=&type=&status=&groupBy=`) so a filtered view is shareable and survives reload. Clearing a filter restores the full list because the underlying subscription is never re-scoped. Fields are exactly the three foundation §6.1 req. 4 names for the device list (`zone`, `type`, `status`) — see the R7 note under "Risks". |
-| **R8** — authenticated session required, no data to unauthenticated requests | Every `liveView.*` query calls `requireAuth(ctx)` from `backend/lib/auth.ts` as its first statement and throws the uniform opaque error on failure (`specs/auth-roles/plan.md`), so a direct query call with no session returns no device or telemetry data. The routes `/` and `/devices/[deviceId]` additionally sit behind auth-roles' route gate. This feature adds no unauthenticated read path. **Depends on auth-roles shipping first — see the confirmation item below.** |
+| **R8** — authenticated session required, no data to unauthenticated requests | Every `liveView.*` query calls `requireAuth(ctx)` from `backend/lib/auth.ts` as its first statement and throws the uniform opaque error on failure (`specs/auth-roles/plan.md`), so a direct query call with no session returns no device or telemetry data. The routes `/` and `/devices/[deviceId]` additionally sit behind auth-roles' route gate. This feature adds no unauthenticated read path. **Status: `Blocked`, not `Met`** — per the 2026-09-20 decision this ships ahead of `auth-roles`, so the guard is in place and audited but cannot be verified end-to-end until a real session mechanism exists. The reviewer should record it that way rather than passing or failing it. |
 
 ---
 
 ## Risks & unknowns
 
-- **R8 is blocked on `auth-roles`, which is planned but not built.** `backend/lib/auth.ts`
-  does not exist yet and `backend/devices.ts` still carries its `TODO(M2)`. If this
-  feature ships first, R8 cannot pass. *Mitigation:* build after auth-roles. If that is
-  not acceptable, the builder should still write `requireAuth(ctx)` calls into every
-  `liveView.*` query against the agreed helper signature, land the helper as the thin
-  `ctx.auth.getUserIdentity()` check, and the reviewer must mark **R8 as blocked**, not
-  met — do not quietly drop the guard.
+- **R8 cannot be verified in this feature's own review.** `auth-roles` is planned but not
+  built — `backend/lib/auth.ts` does not exist and `backend/devices.ts` still carries its
+  `TODO(M2)` — and the 2026-09-20 decision is to build the live view first anyway.
+  *Mitigation:* the thin `requireAuth(ctx)` stub goes in now at every `liveView.*` call
+  site, so the guard is structurally present and auditable by reading the file; the
+  reviewer records R8 as `Blocked`. **The residual risk is that the stub is later
+  softened or bypassed instead of being filled in** — so `auth-roles`' own review must
+  re-verify R8 of *this* spec once it lands, and the guard must never be quietly dropped
+  to make a test pass in the meantime.
 - **Next.js 16 + React 18 mismatch.** The repo runs `next@16.3.1` with `react@18.3.1`
   (lockfile), but Next 16's own upgrade guide states Next 16 requires React 19.2
   ([version-16.mdx](https://github.com/vercel/next.js/blob/canary/docs/01-app/02-guides/upgrading/version-16.mdx)).
@@ -330,19 +337,19 @@ Three lines, as required:
    (key metrics per type, 10 s expected interval × 3 = 30 s stale with a per-device
    `metadata` override, a 50-entry telemetry-derived event log, and no virtualization
    below 500 devices) — each a one-constant change if the team disagrees.
-3. The load-bearing assumptions are that `auth-roles` lands first (R8) and that
+3. The load-bearing assumptions are that the `requireAuth` stub is genuinely filled in
+   when `auth-roles` lands (R8, tracked as `Blocked` until then) and that
    device-supplied timestamps are roughly clock-synced with the browser (R6).
 
-**Decisions to confirm before building:**
+**Decisions confirmed 2026-09-20 — none outstanding, the builder is clear to start:**
 
-- **Sequencing for R8.** This plan assumes `auth-roles` is implemented before this
-  feature, so `requireAuth(ctx)` exists and R8 is verifiable. If you want the live view
-  built first instead, say so — the builder will land the guards against a thin helper
-  and the reviewer will report R8 as *blocked*, not met. This is the one item I would
-  not have the builder decide on its own.
-- **The 30-second staleness threshold** (10 s expected reporting interval × 3), and the
-  per-device escape hatch being `devices.metadata.expectedIntervalMs`. If real device
-  types report on the order of minutes, give me the numbers and I will fold them into
-  `EXPECTED_INTERVAL_MS_BY_TYPE`.
-- **Key metrics for the overview** defaulting to `temperature_c`, `cycle_count`,
-  `error_code` (what the simulator emits), capped at 4 per device type.
+- **R8 sequencing.** Build the live view **now**, ahead of `auth-roles`. Thin
+  `requireAuth(ctx)` stub at every `liveView.*` call site against auth-roles' agreed
+  signature; reviewer marks R8 `Blocked`, not `Met`. Carried into Decision summary §6,
+  the R8 coverage row, and the first risk bullet.
+- **Staleness threshold.** 10 s expected reporting interval × 3 = **30 s**, with
+  `devices.metadata.expectedIntervalMs` as the per-device override. Proceed with these
+  defaults. Still a one-constant change in `EXPECTED_INTERVAL_MS_BY_TYPE` if real device
+  types turn out to report on the order of minutes.
+- **Overview key metrics.** `temperature_c`, `cycle_count`, `error_code` (what the
+  simulator emits), capped at 4 per device type. Proceed with these defaults.
