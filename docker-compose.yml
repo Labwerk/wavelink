@@ -68,6 +68,12 @@ services:
     working_dir: /repo
     environment:
       - CONVEX_SELF_HOSTED_URL=http://backend:3210
+      # Read here so the command below can push it as a *deployment* env var
+      # (see the `npx convex env set` line) — setting it directly on the
+      # `backend` service's environment would NOT work: on self-hosted
+      # Convex, functions read deployment env vars via `process.env`, which
+      # are distinct from the backend container's own OS env.
+      - INGEST_TOKENS=${INGEST_TOKENS:-}
     volumes:
       - .:/repo
       - /repo/node_modules
@@ -86,6 +92,9 @@ services:
         rm -f /repo/.env.local
         until [ -f /convex-data/admin_key.txt ]; do sleep 1; done
         export CONVEX_SELF_HOSTED_ADMIN_KEY=$(cat /convex-data/admin_key.txt)
+        if [ -n "$INGEST_TOKENS" ]; then
+          npx convex env set INGEST_TOKENS "$INGEST_TOKENS"
+        fi
         npx convex dev --once
     depends_on:
       backend:
@@ -115,9 +124,15 @@ services:
       context: ./gateway/simulator
     environment:
       # Container-to-container URL (not the host-exposed CONVEX_CLOUD_ORIGIN,
-      # which the browser/CLI use from outside the compose network).
+      # which the browser/CLI use from outside the compose network). Used
+      # only for the devices.register bootstrap below, not for ingestion.
       - CONVEX_URL=http://backend:3210
       - SIMULATOR_INTERVAL_MS=${SIMULATOR_INTERVAL_MS:-2000}
+      # Container-to-container HTTP Actions origin (`.site`, port 3211) —
+      # where the ingestion endpoint lives (telemetry-ingestion R1).
+      - WAVELINK_INGEST_URL=http://backend:3211/ingest/readings
+      - WAVELINK_INGEST_TOKEN=${WAVELINK_INGEST_TOKEN:-}
+      - WAVELINK_MAX_BATCH=${WAVELINK_MAX_BATCH:-50}
     volumes:
       - ./gateway/simulator:/simulator
       - /simulator/node_modules
