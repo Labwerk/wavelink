@@ -71,7 +71,10 @@ export function DeviceDetail({
       name: values.name,
       type: values.type,
       zone: values.zone,
-      metadata: metadataToRecord(values.metadata),
+      // The edit form always represents the full metadata set, so an empty
+      // list means "clear it" — send {} rather than metadataToRecord's
+      // undefined (which `devices.update` reads as "leave unchanged").
+      metadata: metadataToRecord(values.metadata) ?? {},
     });
     setEditing(false);
   }

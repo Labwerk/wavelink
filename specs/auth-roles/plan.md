@@ -71,11 +71,24 @@ Gateway/simulator ──ingest.recordBatch (service token, NOT user auth)──�
 
 ## Function-level RBAC (what changes in existing code)
 
+> **Updated post-merge:** `device-registry` (merged after this plan was first written)
+> replaced `devices.listActive`/`devices.deactivate` with paginated `devices.list` +
+> `devices.facets`/`devices.changeHistory`, and split `deactivate` into
+> `decommission`/`reactivate`. It also added a temporary auth seam —
+> `backend/lib/access.ts`'s `requireAdmin`/`getActor` and the `access.currentActor`
+> query — standing in for the real role checks below, gated by
+> `DEVICE_REGISTRY_REQUIRE_ADMIN` (default `false`, permissive). This feature's job
+> is to **swap that seam out**, not add a second one: `access.ts` goes away, every
+> caller of `requireAdmin` switches to `requireRole(ctx, "admin")`, and
+> `access.currentActor` is replaced by `users.me`. See
+> `specs/device-registry/spec.md`'s "Verification note — R16, R17, R31" and
+> `specs/device-registry/plan.md`'s "Auth seam" section.
+
 | Function | New guard | Requirement |
 |---|---|---|
-| `devices.listActive`, `devices.get` | `requireAuth` (viewer+) | R1, R3 |
+| `devices.list`, `devices.get`, `devices.facets` | `requireAuth` (viewer+) | R1, R3 |
 | `telemetry.latestForDevice` | `requireAuth` (viewer+) | R1, R3 |
-| `devices.register` / `update` / `deactivate` | `requireRole(admin)` (removes the TODO) | R5, R7-adjacent |
+| `devices.register` / `update` / `decommission` / `reactivate` / `changeHistory` | `requireRole(admin)` (replaces `requireAdmin` from the device-registry seam) | R5, R7-adjacent, R16/R17/R31 |
 | `ingest.recordBatch` | **unchanged** — service token at HTTP layer, no user role | R12 |
 
 New functions (`backend/users.ts`):

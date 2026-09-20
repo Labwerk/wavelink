@@ -257,6 +257,21 @@ describe("devices.update (R13, R21, R23)", () => {
     });
   });
 
+  test("passing metadata: {} clears existing metadata, distinct from omitting the field entirely", async () => {
+    const t = convexTest(schema, modules);
+    const { as: admin } = await createUserFixture(t, "admin");
+    const deviceId = await registerDevice(t, { metadata: { fw: "1.0" } });
+
+    // Omitting metadata leaves it untouched.
+    await admin.mutation(api.devices.update, { deviceId, name: "Still Old" });
+    expect((await admin.query(api.devices.get, { deviceId }))?.metadata).toEqual({ fw: "1.0" });
+
+    // Explicitly passing {} clears it — this is what the edit form sends when
+    // every metadata row is removed (frontend/app/devices/DeviceDetail.tsx).
+    await admin.mutation(api.devices.update, { deviceId, metadata: {} });
+    expect((await admin.query(api.devices.get, { deviceId }))?.metadata).toEqual({});
+  });
+
   test("no edit path changes externalId — supplying one is rejected before the handler runs (R21)", async () => {
     const t = convexTest(schema, modules);
     const { as: admin } = await createUserFixture(t, "admin");
@@ -772,6 +787,26 @@ describe("audit trail (R29, R30)", () => {
 
     const afterHistory = await admin.query(api.devices.changeHistory, { deviceId });
     expect(afterHistory.length).toBe(1); // unchanged — the failed edit left no trace
+  });
+
+  test("re-submitting the same metadata entries in a different key order records no change", async () => {
+    const t = convexTest(schema, modules);
+    const { as: admin } = await createUserFixture(t, "admin");
+    const deviceId = await admin.mutation(api.devices.register, {
+      externalId: "audit-03",
+      name: "Name",
+      type: "agv",
+      metadata: { a: "1", b: "2" },
+    });
+
+    const beforeHistory = await admin.query(api.devices.changeHistory, { deviceId });
+    expect(beforeHistory.length).toBe(1); // the register itself
+
+    // Same key/value pairs, reordered — not a real change (backend/lib/audit.ts diffFields).
+    await admin.mutation(api.devices.update, { deviceId, metadata: { b: "2", a: "1" } });
+
+    const afterHistory = await admin.query(api.devices.changeHistory, { deviceId });
+    expect(afterHistory.length).toBe(1); // unchanged — reordering alone is not a change
   });
 
   async function createUserFixtureWithId(t: Test, role: "admin") {

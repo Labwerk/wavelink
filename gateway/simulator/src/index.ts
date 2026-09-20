@@ -4,6 +4,7 @@
 
 import { ConvexHttpClient } from "convex/browser";
 import { anyApi } from "convex/server";
+import { ConvexError } from "convex/values";
 
 const CONVEX_URL = process.env.CONVEX_URL;
 if (!CONVEX_URL) {
@@ -23,13 +24,27 @@ const client = new ConvexHttpClient(CONVEX_URL);
 
 let cycleCounts = new Map<string, number>(SIMULATED_DEVICES.map((d) => [d.externalId, 0]));
 
+function isAlreadyRegisteredError(err: unknown): boolean {
+  if (!(err instanceof ConvexError)) return false;
+  const data = err.data as { fieldErrors?: { field: string; message: string }[] };
+  return Boolean(
+    data?.fieldErrors?.some(
+      (fe) => fe.field === "externalId" && /already registered/.test(fe.message),
+    ),
+  );
+}
+
 async function ensureDevicesRegistered() {
   for (const device of SIMULATED_DEVICES) {
     try {
       await client.mutation(anyApi.devices.register, device);
       console.log(`Registered device ${device.externalId}`);
     } catch (err) {
-      // Already exists — expected on restarts.
+      if (isAlreadyRegisteredError(err)) continue; // expected on restarts
+      // Anything else (admin-gating denial, validation failure, network error)
+      // must be visible — swallowing it here caused silent ingestion outages
+      // when DEVICE_REGISTRY_REQUIRE_ADMIN is enabled without a service actor.
+      console.error(`Failed to register device ${device.externalId}:`, err);
     }
   }
 }

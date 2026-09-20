@@ -17,6 +17,19 @@ function stringifyForAudit(value: unknown): string | undefined {
   return s.length > MAX_VALUE_LENGTH ? s.slice(0, MAX_VALUE_LENGTH) : s;
 }
 
+/** Sorts object keys recursively so equality checks aren't sensitive to insertion order. */
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value !== null && typeof value === "object") {
+    const sorted: Record<string, unknown> = {};
+    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+      sorted[key] = canonicalize((value as Record<string, unknown>)[key]);
+    }
+    return sorted;
+  }
+  return value;
+}
+
 /** Compares `fields` between `before`/`after`, returning only those that actually changed. */
 export function diffFields(
   before: Record<string, unknown>,
@@ -27,7 +40,7 @@ export function diffFields(
   for (const field of fields) {
     const b = before[field];
     const a = after[field];
-    if (JSON.stringify(b) !== JSON.stringify(a)) {
+    if (JSON.stringify(canonicalize(b)) !== JSON.stringify(canonicalize(a))) {
       changes.push({ field, before: stringifyForAudit(b), after: stringifyForAudit(a) });
     }
   }

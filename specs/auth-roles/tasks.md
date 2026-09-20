@@ -40,17 +40,23 @@
 
 ## Apply RBAC to existing functions
 
-- [ ] **T6** — Gate reads with `requireAuth`: `devices.listActive`, `devices.get`,
-  `telemetry.latestForDevice`.
+- [ ] **T6** — Gate reads with `requireAuth`: `devices.list`, `devices.get`,
+  `devices.facets`, `telemetry.latestForDevice`.
   - Files: `backend/devices.ts`, `backend/telemetry.ts`
   - Satisfies: R1, R3
   - Acceptance: unauth call rejected; viewer call succeeds (test).
 
-- [ ] **T7** — Gate device writes with `requireRole(admin)` (remove the M2 TODO):
-  `devices.register`, `devices.update`, `devices.deactivate`.
-  - Files: `backend/devices.ts`
-  - Satisfies: R5
-  - Acceptance: viewer/operator denied, admin allowed (test).
+- [ ] **T7** — Gate device writes with `requireRole(admin)`, replacing the
+  device-registry auth seam (`backend/lib/access.ts`'s `requireAdmin`/`getActor`,
+  and the `access.currentActor` query, which `users.me` replaces): `devices.register`,
+  `devices.update`, `devices.decommission`, `devices.reactivate`,
+  `devices.changeHistory`. Delete `backend/lib/access.ts` once every caller is
+  switched; flip `DEVICE_REGISTRY_REQUIRE_ADMIN`'s permissive default now that a
+  real auth flow exists.
+  - Files: `backend/devices.ts`, `backend/lib/access.ts` (removed)
+  - Satisfies: R5, R16/R17/R31 (device-registry)
+  - Acceptance: viewer/operator denied, admin allowed (test); no remaining
+    references to `requireAdmin`/`getActor`/`access.currentActor`.
 
 - [ ] **T8** — Confirm `ingest.recordBatch` stays service-auth only (no user-role guard);
   document the service-token expectation in a comment.
@@ -80,9 +86,14 @@
   - Acceptance: valid creds sign in; sign-out returns to protected state.
 
 - [ ] **T12** — Role-based UI gating on the dashboard via `useQuery(api.users.me)`.
-  - Files: `frontend/app/page.tsx`
+  Also swap `frontend/app/devices/DevicesView.tsx`'s existing
+  `useQuery(api.lib.access.currentActor, {})` (the device-registry seam, whose
+  `isAdmin` prop already flows into `DeviceDetail.tsx`) for the same `users.me`
+  role check.
+  - Files: `frontend/app/page.tsx`, `frontend/app/devices/DevicesView.tsx`
   - Satisfies: R8, R9
-  - Acceptance: viewer sees no admin/operator controls; admin sees user-management entry.
+  - Acceptance: viewer sees no admin/operator controls; admin sees user-management entry;
+    device admin controls (register/edit/decommission/history) still gate correctly.
 
 ## Config & docs
 
