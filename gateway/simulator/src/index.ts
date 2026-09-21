@@ -1,20 +1,17 @@
 // Telemetry simulator: stands in for a real protocol adapter (MQTT/OPC-UA/etc.)
 // through v1. Posts batches to the authenticated ingestion HTTP endpoint the
-// same way a real gateway would (telemetry-ingestion R1, R26) — it no longer
-// calls `ingest.recordBatch` directly, since that mutation is now internal
-// and unreachable from any client (R4). Device registration still goes
-// through the Convex client directly; that bootstrap step is a separate,
-// pre-existing concern (see specs/telemetry-ingestion/plan.md's Risks,
-// "Simulator's devices.register bootstrap will break under auth-roles").
+// same way a real gateway would (telemetry-ingestion R1, R26), authenticating
+// with a service credential drawn from `INGEST_TOKENS`
+// (`specs/auth-roles/spec.md` R12: a service credential distinct from any
+// user session) — not by calling `ingest.recordBatch` directly, since that
+// mutation is internal and unreachable from any client (R4). Devices are
+// registered by an admin from the dashboard (`devices.register` is
+// admin-only, per auth-roles); this simulator no longer self-registers them
+// — see specs/telemetry-ingestion/plan.md's Risks, "Simulator's
+// devices.register bootstrap will break under auth-roles" (resolved).
 
-import { ConvexHttpClient } from "convex/browser";
-import { anyApi } from "convex/server";
-
-const CONVEX_URL = process.env.CONVEX_URL;
-if (!CONVEX_URL) {
-  throw new Error("CONVEX_URL env var is required (e.g. http://backend:3210)");
-}
-
+// HTTP actions are served from the deployment's *site* origin (self-hosted:
+// port 3211, `.convex.site` on Convex Cloud) — not the 3210 API origin.
 const INGEST_URL = process.env.WAVELINK_INGEST_URL;
 if (!INGEST_URL) {
   throw new Error("WAVELINK_INGEST_URL env var is required (e.g. http://backend:3211/ingest/readings)");
@@ -25,8 +22,14 @@ if (!INGEST_TOKEN) {
   throw new Error("WAVELINK_INGEST_TOKEN env var is required — a <sourceId>.<secret> entry from INGEST_TOKENS");
 }
 
+const DEFAULT_MAX_BATCH = 50;
 const INTERVAL_MS = Number(process.env.SIMULATOR_INTERVAL_MS ?? 2000);
-const MAX_BATCH = Number(process.env.WAVELINK_MAX_BATCH ?? 50);
+const configuredMaxBatch = Number(process.env.WAVELINK_MAX_BATCH ?? DEFAULT_MAX_BATCH);
+// A configured value <= 0 would otherwise silently disable batching
+// entirely (see `chunk()`'s fallback below) rather than erroring or falling
+// back sensibly — treat it as "not configured".
+const MAX_BATCH =
+  Number.isFinite(configuredMaxBatch) && configuredMaxBatch > 0 ? configuredMaxBatch : DEFAULT_MAX_BATCH;
 
 const MIN_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 60_000;
@@ -34,26 +37,16 @@ let backoffMs = MIN_BACKOFF_MS;
 
 const BATCH_METRICS = ["temperature_c", "cycle_count", "error_code"] as const;
 
+// Devices are registered by an admin from the dashboard (`devices.register`
+// is admin-only); telemetry for devices that do not exist yet is safely
+// skipped by `ingest.recordBatch`. Register these externalIds to see data.
 const SIMULATED_DEVICES = [
   { externalId: "sim-cnc-01", name: "CNC Mill 1", type: "cnc-mill", zone: "line-a" },
   { externalId: "sim-agv-01", name: "AGV 1", type: "agv", zone: "warehouse" },
   { externalId: "sim-arm-01", name: "Robot Arm 1", type: "robot-arm", zone: "line-b" },
 ];
 
-const client = new ConvexHttpClient(CONVEX_URL);
-
 let cycleCounts = new Map<string, number>(SIMULATED_DEVICES.map((d) => [d.externalId, 0]));
-
-async function ensureDevicesRegistered() {
-  for (const device of SIMULATED_DEVICES) {
-    try {
-      await client.mutation(anyApi.devices.register, device);
-      console.log(`Registered device ${device.externalId}`);
-    } catch (err) {
-      // Already exists — expected on restarts.
-    }
-  }
-}
 
 function randomReading(externalId: string, ts: number) {
   const cycles = (cycleCounts.get(externalId) ?? 0) + 1;
@@ -191,7 +184,6 @@ async function tick() {
 }
 
 async function main() {
-  await ensureDevicesRegistered();
   // A recursive await-loop (rather than setInterval) so a rate-limited or
   // failed tick waits out its backoff before the next attempt, instead of
   // firing on a fixed timer regardless of outcome (R26: back off and retry,

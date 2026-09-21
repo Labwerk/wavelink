@@ -11,10 +11,8 @@
     "jsx": "react-jsx",
     "skipLibCheck": true,
     "allowSyntheticDefaultImports": true,
-    // *.test.ts files import sibling modules with an explicit ".ts"
-    // extension so they can run directly under `node --test` (Node's
-    // built-in TypeScript support requires the real file extension). Safe
-    // to enable since `noEmit` is already set below.
+    // Harmless with `noEmit` set below; kept in case any import elsewhere
+    // uses an explicit ".ts" extension.
     "allowImportingTsExtensions": true,
 
     /* These compiler options are required by Convex */

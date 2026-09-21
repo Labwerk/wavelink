@@ -14,7 +14,10 @@ import {
 // directly from a client, which is what actually closes the old
 // unauthenticated write path. The only caller is
 // `backend/ingestHttp.ts`'s httpAction, which has already authenticated the
-// request and rate-limited it before this transaction ever starts.
+// request and rate-limited it before this transaction ever starts — the
+// service credential it checks (`INGEST_TOKENS`) is what satisfies
+// `specs/auth-roles/spec.md` R12; a user session cannot substitute for it
+// (see `backend/lib/ingestAuth.ts`).
 
 interface ClaimedFields {
   externalId?: string;

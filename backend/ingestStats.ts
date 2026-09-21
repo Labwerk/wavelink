@@ -99,7 +99,7 @@ export const summary = internalQuery({
   handler: async (ctx, { fromTs, toTs }) => {
     const rows = await ctx.db
       .query("ingestStats")
-      .filter((q) => q.and(q.gte(q.field("minuteStart"), fromTs), q.lt(q.field("minuteStart"), toTs)))
+      .withIndex("by_minuteStart", (q) => q.gte("minuteStart", fromTs).lt("minuteStart", toTs))
       .collect();
 
     const totals = {

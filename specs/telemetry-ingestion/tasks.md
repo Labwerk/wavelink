@@ -346,6 +346,43 @@
 > Builder fills this in immediately when implementation departs from plan.md —
 > not after the fact, not only when reviewer asks. Empty section = zero deviations.
 
+- **Deviation:** Merged `main` (the `auth-roles` feature) into this branch after review
+  round 2 had already passed, requiring integration changes not anticipated by plan.md.
+  - **Plan said:** Nothing — `auth-roles` hadn't landed yet when this plan was written; its
+    collision risk with this feature was flagged (see Risks: "Simulator's `devices.register`
+    bootstrap", "`backend/http.ts` is shared with `auth-roles`") but not resolved.
+  - **Did instead:** `auth-roles` had independently built its own minimal ingestion-auth path
+    (`backend/lib/serviceAuth.ts`, a single shared `INGEST_SERVICE_TOKEN`, a bare
+    `POST /ingest/telemetry` route with no validation/rejection-recording/rate-limiting) to
+    satisfy its own spec's R12. On merge, this feature's implementation was kept as the real
+    ingestion path (it's a strict superset — satisfies auth-roles' R12 too, plus closes
+    foundation R23's silent-drop problem and adds rate limiting/observability that
+    `auth-roles`' version lacked); `auth-roles`' minimal version and `serviceAuth.ts` were
+    removed. `backend/http.ts` keeps both `auth.addHttpRoutes(http)` (required for Convex
+    Auth's own sign-in routes) and this feature's `/ingest/readings` route, exactly as the
+    Risks section anticipated. `backend/schema.ts` merged both features' tables. The test
+    suite migrated from `node --test` (`backend/lib/*.test.ts`) to `vitest` + `convex-test`
+    (`tests/*.test.ts`), the test framework `auth-roles` established — `tests/ingest.test.ts`
+    was rewritten as real integration tests using `t.fetch()` against this feature's actual
+    endpoint, which finally exercises the full HTTP-action → internal-mutation pipeline
+    in-process (see plan.md's Risks, "no live/integration test was possible", now partially
+    resolved). The simulator's device-registration bootstrap was removed to match
+    `auth-roles`' own fix for that exact collision (devices are now admin-registered via the
+    dashboard).
+  - **Why:** Two independently-developed features touched the same seam (ingestion auth).
+    Keeping the more complete, already-reviewed implementation avoided regressing this
+    feature's hardening while still satisfying everything `auth-roles` needed from ingestion.
+  - **Consequence:** All 27 requirements remain met (re-verified: `npm test` — now `vitest
+    run` — 188/188 passing across 12 files, `tsc --noEmit` clean across backend/simulator/
+    frontend, `docker compose config` valid). Two real bugs found by an independent
+    `/code-review` pass on the pre-merge branch were fixed during this integration:
+    `ingestStats.summary` now uses the `by_minuteStart` index instead of a full-table
+    `.filter()` scan (was at risk of exceeding Convex's per-transaction scan limit at the
+    documented 90-day retention default), and a batch whose reading count exceeds
+    `INGEST_READING_BURST` is now refused as `batch_too_large` before ever reaching the rate
+    limiter, instead of getting an impossible-to-satisfy `rate_limited` response with a
+    `retryAfterMs` that could never actually succeed.
+
 - **Deviation:** Rate limiting implemented as a hand-rolled token bucket
   (`backend/lib/ingestRateLimit.ts` + `ingestRateLimits` table) instead of the
   `@convex-dev/rate-limiter` component.

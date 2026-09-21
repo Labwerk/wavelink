@@ -47,70 +47,33 @@ export const INGEST_CONFIG_DEFAULTS: IngestConfig = {
   statsRetentionMs: 7776000000, // 90 days
 };
 
+// One row per config field: its env var name, so `loadIngestConfig` doesn't
+// need a `numberFromEnv(env, "...", DEFAULTS...)` call spelled out 14 times.
+// Keys are checked against `IngestConfig` by `ENV_KEYS_ARE_EXHAUSTIVE` below,
+// so a field added to the interface without an entry here fails typechecking
+// rather than silently always falling back to its default.
+const ENV_KEYS: { [K in keyof IngestConfig]: string } = {
+  maxReadingsPerBatch: "INGEST_MAX_READINGS_PER_BATCH",
+  maxPayloadBytes: "INGEST_MAX_PAYLOAD_BYTES",
+  maxFutureSkewMs: "INGEST_MAX_FUTURE_SKEW_MS",
+  maxBackfillAgeMs: "INGEST_MAX_BACKFILL_AGE_MS",
+  maxExternalIdLength: "INGEST_MAX_EXTERNAL_ID_LENGTH",
+  maxMetricLength: "INGEST_MAX_METRIC_LENGTH",
+  maxStringValueLength: "INGEST_MAX_STRING_VALUE_LENGTH",
+  requestsPerMinute: "INGEST_REQUESTS_PER_MINUTE",
+  requestBurst: "INGEST_REQUEST_BURST",
+  readingsPerMinute: "INGEST_READINGS_PER_MINUTE",
+  readingBurst: "INGEST_READING_BURST",
+  rejectionRetentionMs: "INGEST_REJECTION_RETENTION_MS",
+  rejectionMaxRows: "INGEST_REJECTION_MAX_ROWS",
+  statsRetentionMs: "INGEST_STATS_RETENTION_MS",
+};
+
 /** Reads ingestion limits from the given env (defaults to `process.env`). */
 export function loadIngestConfig(env: NodeJS.ProcessEnv = process.env): IngestConfig {
-  return {
-    maxReadingsPerBatch: numberFromEnv(
-      env,
-      "INGEST_MAX_READINGS_PER_BATCH",
-      INGEST_CONFIG_DEFAULTS.maxReadingsPerBatch,
-    ),
-    maxPayloadBytes: numberFromEnv(
-      env,
-      "INGEST_MAX_PAYLOAD_BYTES",
-      INGEST_CONFIG_DEFAULTS.maxPayloadBytes,
-    ),
-    maxFutureSkewMs: numberFromEnv(
-      env,
-      "INGEST_MAX_FUTURE_SKEW_MS",
-      INGEST_CONFIG_DEFAULTS.maxFutureSkewMs,
-    ),
-    maxBackfillAgeMs: numberFromEnv(
-      env,
-      "INGEST_MAX_BACKFILL_AGE_MS",
-      INGEST_CONFIG_DEFAULTS.maxBackfillAgeMs,
-    ),
-    maxExternalIdLength: numberFromEnv(
-      env,
-      "INGEST_MAX_EXTERNAL_ID_LENGTH",
-      INGEST_CONFIG_DEFAULTS.maxExternalIdLength,
-    ),
-    maxMetricLength: numberFromEnv(
-      env,
-      "INGEST_MAX_METRIC_LENGTH",
-      INGEST_CONFIG_DEFAULTS.maxMetricLength,
-    ),
-    maxStringValueLength: numberFromEnv(
-      env,
-      "INGEST_MAX_STRING_VALUE_LENGTH",
-      INGEST_CONFIG_DEFAULTS.maxStringValueLength,
-    ),
-    requestsPerMinute: numberFromEnv(
-      env,
-      "INGEST_REQUESTS_PER_MINUTE",
-      INGEST_CONFIG_DEFAULTS.requestsPerMinute,
-    ),
-    requestBurst: numberFromEnv(env, "INGEST_REQUEST_BURST", INGEST_CONFIG_DEFAULTS.requestBurst),
-    readingsPerMinute: numberFromEnv(
-      env,
-      "INGEST_READINGS_PER_MINUTE",
-      INGEST_CONFIG_DEFAULTS.readingsPerMinute,
-    ),
-    readingBurst: numberFromEnv(env, "INGEST_READING_BURST", INGEST_CONFIG_DEFAULTS.readingBurst),
-    rejectionRetentionMs: numberFromEnv(
-      env,
-      "INGEST_REJECTION_RETENTION_MS",
-      INGEST_CONFIG_DEFAULTS.rejectionRetentionMs,
-    ),
-    rejectionMaxRows: numberFromEnv(
-      env,
-      "INGEST_REJECTION_MAX_ROWS",
-      INGEST_CONFIG_DEFAULTS.rejectionMaxRows,
-    ),
-    statsRetentionMs: numberFromEnv(
-      env,
-      "INGEST_STATS_RETENTION_MS",
-      INGEST_CONFIG_DEFAULTS.statsRetentionMs,
-    ),
-  };
+  const config = {} as IngestConfig;
+  for (const key of Object.keys(ENV_KEYS) as (keyof IngestConfig)[]) {
+    config[key] = numberFromEnv(env, ENV_KEYS[key], INGEST_CONFIG_DEFAULTS[key]);
+  }
+  return config;
 }

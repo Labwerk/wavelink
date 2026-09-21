@@ -1,49 +1,48 @@
-import { test } from "node:test";
-import assert from "node:assert/strict";
+import { expect, test } from "vitest";
 import {
   parseIngestTokens,
   extractBearerToken,
   constantTimeEqual,
   authenticateIngestRequest,
-} from "./ingestAuth.ts";
+} from "../backend/lib/ingestAuth";
 
 test("parseIngestTokens splits sourceId from secret on the first dot", () => {
   const entries = parseIngestTokens("sim-1.s3cr3t,sim-2.other.secret");
-  assert.deepEqual(entries, [
+  expect(entries).toEqual([
     { sourceId: "sim-1", token: "sim-1.s3cr3t" },
     { sourceId: "sim-2", token: "sim-2.other.secret" },
   ]);
 });
 
 test("parseIngestTokens drops malformed entries without throwing", () => {
-  assert.deepEqual(parseIngestTokens("no-dot-here, ,.emptysource,onlysource."), []);
+  expect(parseIngestTokens("no-dot-here, ,.emptysource,onlysource.")).toEqual([]);
 });
 
 test("parseIngestTokens returns empty for undefined/empty env", () => {
-  assert.deepEqual(parseIngestTokens(undefined), []);
-  assert.deepEqual(parseIngestTokens(""), []);
+  expect(parseIngestTokens(undefined)).toEqual([]);
+  expect(parseIngestTokens("")).toEqual([]);
 });
 
 test("extractBearerToken reads the Bearer scheme case-insensitively", () => {
-  assert.equal(extractBearerToken("Bearer abc123"), "abc123");
-  assert.equal(extractBearerToken("bearer   abc123  "), "abc123");
+  expect(extractBearerToken("Bearer abc123")).toBe("abc123");
+  expect(extractBearerToken("bearer   abc123  ")).toBe("abc123");
 });
 
 test("extractBearerToken returns empty string for missing/malformed header", () => {
-  assert.equal(extractBearerToken(null), "");
-  assert.equal(extractBearerToken(undefined), "");
-  assert.equal(extractBearerToken("Basic abc123"), "");
-  assert.equal(extractBearerToken(""), "");
+  expect(extractBearerToken(null)).toBe("");
+  expect(extractBearerToken(undefined)).toBe("");
+  expect(extractBearerToken("Basic abc123")).toBe("");
+  expect(extractBearerToken("")).toBe("");
 });
 
 test("constantTimeEqual matches identical strings", () => {
-  assert.equal(constantTimeEqual("sim-1.s3cr3t", "sim-1.s3cr3t"), true);
+  expect(constantTimeEqual("sim-1.s3cr3t", "sim-1.s3cr3t")).toBe(true);
 });
 
 test("constantTimeEqual rejects different strings, including differing lengths", () => {
-  assert.equal(constantTimeEqual("sim-1.s3cr3t", "sim-1.wrong"), false);
-  assert.equal(constantTimeEqual("short", "a-lot-longer-string"), false);
-  assert.equal(constantTimeEqual("", ""), true);
+  expect(constantTimeEqual("sim-1.s3cr3t", "sim-1.wrong")).toBe(false);
+  expect(constantTimeEqual("short", "a-lot-longer-string")).toBe(false);
+  expect(constantTimeEqual("", "")).toBe(true);
 });
 
 test("constantTimeEqual never short-circuits: compare count depends only on length, not mismatch position", () => {
@@ -55,39 +54,39 @@ test("constantTimeEqual never short-circuits: compare count depends only on leng
   constantTimeEqual("xxxxxxxxxX", "xxxxxxxxxY", () => lateMismatchCount++);
   constantTimeEqual("xxxxxxxxxx", "xxxxxxxxxx", () => fullMatchCount++);
 
-  assert.equal(earlyMismatchCount, 10);
-  assert.equal(lateMismatchCount, 10);
-  assert.equal(fullMatchCount, 10);
-  assert.equal(earlyMismatchCount, lateMismatchCount);
+  expect(earlyMismatchCount).toBe(10);
+  expect(lateMismatchCount).toBe(10);
+  expect(fullMatchCount).toBe(10);
+  expect(earlyMismatchCount).toBe(lateMismatchCount);
 });
 
 test("authenticateIngestRequest matches a configured token", () => {
   const result = authenticateIngestRequest("Bearer sim-1.s3cr3t", "sim-1.s3cr3t,sim-2.other");
-  assert.deepEqual(result, { sourceId: "sim-1" });
+  expect(result).toEqual({ sourceId: "sim-1" });
 });
 
 test("authenticateIngestRequest rejects a garbage credential", () => {
   const result = authenticateIngestRequest("Bearer garbage", "sim-1.s3cr3t");
-  assert.equal(result, null);
+  expect(result).toBeNull();
 });
 
 test("authenticateIngestRequest rejects a missing credential", () => {
-  assert.equal(authenticateIngestRequest(null, "sim-1.s3cr3t"), null);
-  assert.equal(authenticateIngestRequest(undefined, "sim-1.s3cr3t"), null);
+  expect(authenticateIngestRequest(null, "sim-1.s3cr3t")).toBeNull();
+  expect(authenticateIngestRequest(undefined, "sim-1.s3cr3t")).toBeNull();
 });
 
 test("authenticateIngestRequest always refuses when INGEST_TOKENS is unset or empty (R5)", () => {
-  assert.equal(authenticateIngestRequest("Bearer sim-1.s3cr3t", undefined), null);
-  assert.equal(authenticateIngestRequest("Bearer sim-1.s3cr3t", ""), null);
-  assert.equal(authenticateIngestRequest("Bearer anything-at-all", ""), null);
+  expect(authenticateIngestRequest("Bearer sim-1.s3cr3t", undefined)).toBeNull();
+  expect(authenticateIngestRequest("Bearer sim-1.s3cr3t", "")).toBeNull();
+  expect(authenticateIngestRequest("Bearer anything-at-all", "")).toBeNull();
 });
 
 test("authenticateIngestRequest: rotation overlap — two tokens sharing a sourceId both match (R6)", () => {
   const tokens = "sim-1.oldsecret,sim-1.newsecret";
-  assert.deepEqual(authenticateIngestRequest("Bearer sim-1.oldsecret", tokens), {
+  expect(authenticateIngestRequest("Bearer sim-1.oldsecret", tokens)).toEqual({
     sourceId: "sim-1",
   });
-  assert.deepEqual(authenticateIngestRequest("Bearer sim-1.newsecret", tokens), {
+  expect(authenticateIngestRequest("Bearer sim-1.newsecret", tokens)).toEqual({
     sourceId: "sim-1",
   });
 });
@@ -97,22 +96,22 @@ test("authenticateIngestRequest: retiring a token immediately stops it matching,
   const afterRotation = "sim-1.newsecret";
 
   // Both work during the overlap window.
-  assert.notEqual(authenticateIngestRequest("Bearer sim-1.oldsecret", beforeRotation), null);
-  assert.notEqual(authenticateIngestRequest("Bearer sim-1.newsecret", beforeRotation), null);
+  expect(authenticateIngestRequest("Bearer sim-1.oldsecret", beforeRotation)).not.toBeNull();
+  expect(authenticateIngestRequest("Bearer sim-1.newsecret", beforeRotation)).not.toBeNull();
 
   // After retiring the old value, only the new one works.
-  assert.equal(authenticateIngestRequest("Bearer sim-1.oldsecret", afterRotation), null);
-  assert.deepEqual(authenticateIngestRequest("Bearer sim-1.newsecret", afterRotation), {
+  expect(authenticateIngestRequest("Bearer sim-1.oldsecret", afterRotation)).toBeNull();
+  expect(authenticateIngestRequest("Bearer sim-1.newsecret", afterRotation)).toEqual({
     sourceId: "sim-1",
   });
 });
 
 test("authenticateIngestRequest: two distinct sources are told apart (R23 dependency)", () => {
   const tokens = "src-a.secretA,src-b.secretB";
-  assert.deepEqual(authenticateIngestRequest("Bearer src-a.secretA", tokens), {
+  expect(authenticateIngestRequest("Bearer src-a.secretA", tokens)).toEqual({
     sourceId: "src-a",
   });
-  assert.deepEqual(authenticateIngestRequest("Bearer src-b.secretB", tokens), {
+  expect(authenticateIngestRequest("Bearer src-b.secretB", tokens)).toEqual({
     sourceId: "src-b",
   });
 });
@@ -121,5 +120,5 @@ test("authenticateIngestRequest: a Convex Auth-shaped bearer value never matches
   // Simulates an end-user session JWT presented as a bearer credential —
   // it simply fails to match any configured ingestion token.
   const endUserJwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyLTEifQ.signature";
-  assert.equal(authenticateIngestRequest(`Bearer ${endUserJwt}`, "sim-1.s3cr3t"), null);
+  expect(authenticateIngestRequest(`Bearer ${endUserJwt}`, "sim-1.s3cr3t")).toBeNull();
 });

@@ -1,15 +1,14 @@
-import { test } from "node:test";
-import assert from "node:assert/strict";
-import { loadIngestConfig, INGEST_CONFIG_DEFAULTS } from "./ingestConfig.ts";
+import { expect, test } from "vitest";
+import { loadIngestConfig, INGEST_CONFIG_DEFAULTS } from "../backend/lib/ingestConfig";
 
 test("loadIngestConfig falls back to documented defaults when env is empty", () => {
   const config = loadIngestConfig({});
-  assert.deepEqual(config, INGEST_CONFIG_DEFAULTS);
+  expect(config).toEqual(INGEST_CONFIG_DEFAULTS);
 });
 
 test("loadIngestConfig ignores unset and empty-string env vars", () => {
   const config = loadIngestConfig({ INGEST_MAX_READINGS_PER_BATCH: "" });
-  assert.equal(config.maxReadingsPerBatch, INGEST_CONFIG_DEFAULTS.maxReadingsPerBatch);
+  expect(config.maxReadingsPerBatch).toBe(INGEST_CONFIG_DEFAULTS.maxReadingsPerBatch);
 });
 
 test("loadIngestConfig applies every override", () => {
@@ -30,7 +29,7 @@ test("loadIngestConfig applies every override", () => {
     INGEST_STATS_RETENTION_MS: "140",
   };
   const config = loadIngestConfig(env);
-  assert.deepEqual(config, {
+  expect(config).toEqual({
     maxReadingsPerBatch: 10,
     maxPayloadBytes: 20,
     maxFutureSkewMs: 30,
@@ -50,5 +49,5 @@ test("loadIngestConfig applies every override", () => {
 
 test("loadIngestConfig falls back on a non-numeric override", () => {
   const config = loadIngestConfig({ INGEST_MAX_READINGS_PER_BATCH: "not-a-number" });
-  assert.equal(config.maxReadingsPerBatch, INGEST_CONFIG_DEFAULTS.maxReadingsPerBatch);
+  expect(config.maxReadingsPerBatch).toBe(INGEST_CONFIG_DEFAULTS.maxReadingsPerBatch);
 });

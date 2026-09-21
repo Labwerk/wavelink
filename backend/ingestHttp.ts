@@ -133,7 +133,18 @@ export const ingestReadings = httpAction(async (ctx, request) => {
     return errorResponse(413, "batch_too_large");
   }
 
-  // 5. Rate-limit readings, per source (R21, R23).
+  // 5. Rate-limit readings, per source (R21, R23). Guard first: if this
+  // batch's reading count alone exceeds the token bucket's capacity
+  // (INGEST_READING_BURST), no amount of waiting can ever satisfy it — the
+  // bucket refills up to `capacity` and never further, so `cost > capacity`
+  // is a permanent, not transient, denial. Treating that as `rate_limited`
+  // would promise a `retryAfterMs` that can never actually succeed; it's
+  // really the same class of problem as an oversize batch (the sender must
+  // send a smaller one), so it gets the same category and status.
+  if (readings.length > config.readingBurst) {
+    await recordStatsBestEffort(ctx, { sourceId, outcome: "oversize" });
+    return errorResponse(413, "batch_too_large");
+  }
   const readingLimit = await ctx.runMutation(internal.ingestRateLimit.consume, {
     key: `ingestReadings:${sourceId}`,
     cost: readings.length,

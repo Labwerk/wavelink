@@ -300,14 +300,30 @@ see Risks.
   deliberately, so unauthenticated traffic cannot drive writes. If the reviewer reads R7 as
   requiring a queryable row per failure, the fix is a bounded `ingestAuthFailures` table with
   its own write budget; flag it rather than silently adding an unauthenticated write path.
-- **Simulator's `devices.register` bootstrap will break under `auth-roles`.** That plan gates
-  `devices.register` to admin, but the simulator calls it unauthenticated at startup. Out of
-  scope here (this feature only closes the *telemetry write* path), but it is a real
-  cross-feature collision — it needs an admin-run seed step or an internal seeding function.
-  Raise with whoever builds `auth-roles`.
-- **`backend/http.ts` is shared with `auth-roles`.** Both features add routes to the same
-  `httpRouter()`. Whoever lands second must add to the existing file, not replace it
-  (`auth.addHttpRoutes(http)` alongside the ingest route).
+- **Simulator's `devices.register` bootstrap will break under `auth-roles` (RESOLVED).**
+  `auth-roles` has landed on `main` and, as this risk predicted, gates `devices.register` to
+  admin. Rather than adding a seed step, `auth-roles`' own merge removed the simulator's
+  self-registration entirely: devices are now registered by an admin from the dashboard, and
+  ingestion for a not-yet-registered `externalId` is safely rejected as `unknown_device`
+  (R11) rather than silently skipped. This feature's merge with `main` adopted the same fix —
+  `gateway/simulator/src/index.ts` no longer calls `devices.register` at all.
+- **`backend/http.ts` is shared with `auth-roles` (RESOLVED as predicted).** Both features
+  landed routes on the same `httpRouter()`; the merge kept both — `auth.addHttpRoutes(http)`
+  from `auth-roles` alongside this feature's `POST /ingest/readings` route — exactly as this
+  risk anticipated, with `auth-roles`' own overlapping minimal ingestion-auth code
+  (`backend/lib/serviceAuth.ts`, a single-token `POST /ingest/telemetry` route) removed in
+  favor of this feature's more complete implementation (rotatable per-source credentials,
+  validation, rejection records, rate limiting — all things `auth-roles`' version lacked).
+- **No live/integration test was possible in this build sandbox (PARTIALLY RESOLVED).** The
+  merge with `main` brought in `vitest` + `convex-test` (added by `auth-roles`), which runs an
+  in-process Convex simulation — `t.fetch()` genuinely executes the HTTP action → internal
+  mutation pipeline, including auth, validation, rejection recording, and rate limiting,
+  without needing a live deployment. `tests/ingest.test.ts` was rewritten as real integration
+  tests against this feature's actual endpoint using that harness, closing most of the gap
+  `review.md` flagged. What remains genuinely unverified is Docker/GHCR-image-level behavior
+  specific to a real self-hosted backend container (whether `@convex-dev/rate-limiter` itself
+  would have pushed cleanly, real cron execution, real credential rotation against a live
+  deployment) — `convex-test` does not exercise any of that.
 - **Rate-limit tokens spent in the action are not refunded** if the subsequent mutation throws.
   Intentional (see Tech decisions), but it means a backend-side failure consumes a sender's
   allowance. Acceptable at the chosen headroom; revisit with `reserve` if it ever bites.
