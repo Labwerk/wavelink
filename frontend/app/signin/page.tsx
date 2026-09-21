@@ -34,15 +34,14 @@ export default function SignInPage() {
       style={{
         maxWidth: 360,
         margin: "4rem auto",
-        padding: "2rem",
-        fontFamily: "sans-serif",
+        padding: "var(--space-6)",
       }}
     >
       <h1>Wavelink</h1>
       <p>Sign in to view the dashboard.</p>
       <form
         onSubmit={handleSubmit}
-        style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}
+        style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}
       >
         <label>
           Email
@@ -64,12 +63,12 @@ export default function SignInPage() {
             style={{ display: "block", width: "100%" }}
           />
         </label>
-        {error && <p style={{ color: "crimson" }}>{error}</p>}
+        {error && <p style={{ color: "var(--color-danger)" }}>{error}</p>}
         <button type="submit" disabled={submitting}>
           Sign in
         </button>
       </form>
-      <p style={{ marginTop: "1.5rem", fontSize: "0.85rem", color: "#666" }}>
+      <p style={{ marginTop: "var(--space-5)", fontSize: "var(--text-sm)", color: "var(--color-text-muted)" }}>
         Accounts are created by an administrator. Ask yours if you need access.
       </p>
     </main>

@@ -13,9 +13,9 @@ const CONNECTIVITY_LABEL: Record<string, string> = {
 };
 
 const CONNECTIVITY_COLOR: Record<string, string> = {
-  online: "#1a7f37",
-  offline: "#b42318",
-  unknown: "#666",
+  online: "var(--color-success)",
+  offline: "var(--color-danger)",
+  unknown: "var(--color-neutral)",
 };
 
 function Badge({ children, color, muted }: { children: React.ReactNode; color: string; muted?: boolean }) {
@@ -23,11 +23,11 @@ function Badge({ children, color, muted }: { children: React.ReactNode; color: s
     <span
       style={{
         display: "inline-block",
-        padding: "0.15rem 0.5rem",
-        borderRadius: "999px",
+        padding: "0.15rem var(--space-2)",
+        borderRadius: "var(--radius-pill)",
         fontSize: "0.8rem",
-        fontWeight: 600,
-        color: "#fff",
+        fontWeight: "var(--weight-semibold)",
+        color: "var(--color-on-accent)",
         background: color,
         opacity: muted ? 0.55 : 1,
       }}
@@ -124,10 +124,10 @@ export function DeviceDetail({
   return (
     <div>
       <h2>{device.name}</h2>
-      <p style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+      <p style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
         {/* R28: lifecycle is rendered separately and more prominently than connectivity —
             a decommissioned device is never shown merely as "offline". */}
-        <Badge color={isDecommissioned ? "#555" : "#0b5fff"}>
+        <Badge color={isDecommissioned ? "var(--color-decommissioned)" : "var(--color-accent)"}>
           {isDecommissioned ? "Decommissioned" : "In service"}
         </Badge>
         <Badge color={CONNECTIVITY_COLOR[device.status]} muted={isDecommissioned}>
@@ -149,7 +149,7 @@ export function DeviceDetail({
         </ul>
       )}
       {(device.rejectedReadingCount ?? 0) > 0 && (
-        <p style={{ color: "#b45309" }}>
+        <p style={{ color: "var(--color-warning)" }}>
           {device.rejectedReadingCount} reading(s) rejected while decommissioned
           {device.lastRejectedReadingAt
             ? ` (last at ${new Date(device.lastRejectedReadingAt).toLocaleString()})`
@@ -159,7 +159,7 @@ export function DeviceDetail({
       )}
 
       {isAdmin && (
-        <div style={{ display: "flex", gap: "0.5rem", margin: "0.5rem 0" }}>
+        <div style={{ display: "flex", gap: "var(--space-2)", margin: "var(--space-2) 0" }}>
           <button onClick={() => setEditing(true)} disabled={isDecommissioned}>
             Edit
           </button>
@@ -168,7 +168,7 @@ export function DeviceDetail({
           </button>
         </div>
       )}
-      {actionError && <p style={{ color: "crimson" }}>{actionError}</p>}
+      {actionError && <p style={{ color: "var(--color-danger)" }}>{actionError}</p>}
 
       <table>
         <thead>
@@ -190,12 +190,12 @@ export function DeviceDetail({
       </table>
 
       {isAdmin && (
-        <div style={{ marginTop: "1rem" }}>
+        <div style={{ marginTop: "var(--space-4)" }}>
           <button onClick={() => setShowHistory((v) => !v)}>
             {showHistory ? "Hide" : "Show"} change history
           </button>
           {showHistory && (
-            <table style={{ marginTop: "0.5rem" }}>
+            <table style={{ marginTop: "var(--space-2)" }}>
               <thead>
                 <tr>
                   <th style={{ textAlign: "left" }}>When</th>

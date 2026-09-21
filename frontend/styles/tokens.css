@@ -1,0 +1,62 @@
+/*
+ * Design tokens: the ONLY place visual values are defined (design-system R1).
+ * Everything else (CSS Modules, inline styles, globals.css) references these
+ * with var(--token). Documented in styles/README.md; a test keeps the two in
+ * sync. Dark theme only for v1.
+ */
+:root {
+  /* Colors: surfaces and text */
+  --color-bg: #0b1020;
+  --color-surface: #131a2e;
+  --color-surface-raised: #1b2440;
+  --color-border: #2a3556;
+  --color-text: #e6eaf5;
+  --color-text-muted: #9aa6c4;
+
+  /* Colors: accent */
+  --color-accent: #5b9dff;
+  --color-on-accent: #0b1020;
+
+  /* Colors: status (always paired with a glyph and a text label) */
+  --color-success: #3dd68c;
+  --color-warning: #f5b942;
+  --color-danger: #ff6b6b;
+  --color-neutral: #9aa6c4;
+  --color-decommissioned: #909bb9;
+  --color-success-bg: rgba(61, 214, 140, 0.14);
+  --color-warning-bg: rgba(245, 185, 66, 0.14);
+  --color-danger-bg: rgba(255, 107, 107, 0.14);
+  --color-neutral-bg: rgba(154, 166, 196, 0.14);
+
+  /* Spacing (4px base) */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+
+  /* Typography */
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --text-xs: 0.75rem;
+  --text-sm: 0.85rem;
+  --text-md: 1rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.5rem;
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+  --weight-regular: 400;
+  --weight-semibold: 600;
+
+  /* Radius */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+
+  /* Layout */
+  --sidebar-width: 14.5rem;
+  --topbar-height: 3.5rem;
+}

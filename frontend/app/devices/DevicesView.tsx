@@ -104,14 +104,14 @@ export function DevicesView() {
   const groupCounts = groupBy === "zone" ? facets?.zones : groupBy === "type" ? facets?.types : facets?.statuses;
 
   return (
-    <main style={{ display: "flex", gap: "2rem", padding: "2rem", fontFamily: "sans-serif" }}>
+    <main style={{ display: "flex", gap: "var(--space-6)", padding: "var(--space-6)" }}>
       <section style={{ flex: 2 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <h1>Devices</h1>
           {isAdmin && <button onClick={() => setShowRegister(true)}>Register device</button>}
         </div>
 
-        <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", margin: "1rem 0" }}>
+        <div style={{ display: "flex", gap: "var(--space-4)", flexWrap: "wrap", margin: "var(--space-4) 0" }}>
           <label>
             Zone{" "}
             <select value={zone ?? ""} onChange={(e) => setParams({ zone: e.target.value || undefined })}>
@@ -170,7 +170,7 @@ export function DevicesView() {
         </div>
 
         {groupBy !== "none" && groupCounts && (
-          <p style={{ color: "#666" }}>
+          <p style={{ color: "var(--color-text-muted)" }}>
             {groupCounts.map((g) => `${g.value} (${g.count})`).join(" · ")}
             {facets?.truncated && " — counts truncated at scan cap"}
           </p>
@@ -183,7 +183,7 @@ export function DevicesView() {
 
         {groupedEntries
           ? groupedEntries.map(([groupValue, devices]) => (
-              <div key={groupValue} style={{ marginBottom: "1rem" }}>
+              <div key={groupValue} style={{ marginBottom: "var(--space-4)" }}>
                 <h3>
                   {groupValue} ({devices.length})
                 </h3>
@@ -242,10 +242,10 @@ function DeviceList({
           key={d._id}
           onClick={() => onSelect(d._id)}
           style={{
-            padding: "0.5rem",
+            padding: "var(--space-2)",
             cursor: "pointer",
-            background: selectedId === d._id ? "#eef" : "transparent",
-            borderBottom: "1px solid #ddd",
+            background: selectedId === d._id ? "var(--color-surface-raised)" : "transparent",
+            borderBottom: "1px solid var(--color-border)",
           }}
         >
           <strong>{d.name}</strong> ({d.type}) — {d.lifecycle === "decommissioned" ? "decommissioned" : d.status}

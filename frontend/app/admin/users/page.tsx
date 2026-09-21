@@ -18,14 +18,14 @@ export default function AdminUsersPage() {
 
   if (me === undefined) {
     return (
-      <main style={{ padding: "2rem", fontFamily: "sans-serif" }}>
+      <main style={{ padding: "var(--space-6)" }}>
         <p>Loading…</p>
       </main>
     );
   }
   if (me === null || !me.capabilities.includes("user.manage")) {
     return (
-      <main style={{ padding: "2rem", fontFamily: "sans-serif" }}>
+      <main style={{ padding: "var(--space-6)" }}>
         <p>Not available.</p>
         <Link href="/">Back to dashboard</Link>
       </main>
@@ -62,13 +62,13 @@ function UserAdmin({ currentUserId }: { currentUserId: Id<"users"> }) {
   const emailById = new Map(users?.map((u) => [u._id, u.email]));
 
   return (
-    <main style={{ padding: "2rem", fontFamily: "sans-serif" }}>
-      <header style={{ display: "flex", justifyContent: "space-between", marginBottom: "1.5rem" }}>
+    <main style={{ padding: "var(--space-6)" }}>
+      <header style={{ display: "flex", justifyContent: "space-between", marginBottom: "var(--space-5)" }}>
         <h1 style={{ margin: 0 }}>Users</h1>
         <Link href="/">Back to dashboard</Link>
       </header>
 
-      {error && <p style={{ color: "crimson" }}>{error}</p>}
+      {error && <p style={{ color: "var(--color-danger)" }}>{error}</p>}
       {users === undefined && <p>Loading…</p>}
       <table>
         <thead>
@@ -113,7 +113,7 @@ function UserAdmin({ currentUserId }: { currentUserId: Id<"users"> }) {
 
       <CreateUserForm />
 
-      <h2 style={{ marginTop: "2rem" }}>Recent changes</h2>
+      <h2 style={{ marginTop: "var(--space-6)" }}>Recent changes</h2>
       <table>
         <thead>
           <tr>
@@ -177,10 +177,10 @@ function CreateUserForm() {
   return (
     <form
       onSubmit={handleSubmit}
-      style={{ marginTop: "1.5rem", borderTop: "1px solid #ddd", paddingTop: "1rem" }}
+      style={{ marginTop: "var(--space-5)", borderTop: "1px solid var(--color-border)", paddingTop: "var(--space-4)" }}
     >
       <h2>Create user</h2>
-      <div style={{ display: "grid", gap: "0.5rem", maxWidth: 320 }}>
+      <div style={{ display: "grid", gap: "var(--space-2)", maxWidth: 320 }}>
         <input name="email" type="email" placeholder="Email" required />
         <input name="name" placeholder="Display name (optional)" />
         <input
@@ -191,7 +191,7 @@ function CreateUserForm() {
           minLength={8}
           autoComplete="new-password"
         />
-        {error && <p style={{ color: "crimson" }}>{error}</p>}
+        {error && <p style={{ color: "var(--color-danger)" }}>{error}</p>}
         {created && (
           <p>
             Created {created} as viewer. Share the temporary password out-of-band, then promote

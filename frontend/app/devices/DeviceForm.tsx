@@ -103,8 +103,8 @@ export function DeviceForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-      {errors._form && <p style={{ color: "crimson" }}>{errors._form}</p>}
+    <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+      {errors._form && <p style={{ color: "var(--color-danger)" }}>{errors._form}</p>}
 
       <label>
         External identifier
@@ -115,9 +115,9 @@ export function DeviceForm({
           style={{ display: "block", width: "100%" }}
         />
         {mode === "edit" && (
-          <small style={{ color: "#666" }}>Immutable after registration — cannot be edited.</small>
+          <small style={{ color: "var(--color-text-muted)" }}>Immutable after registration — cannot be edited.</small>
         )}
-        {errors.externalId && <small style={{ color: "crimson" }}>{errors.externalId}</small>}
+        {errors.externalId && <small style={{ color: "var(--color-danger)" }}>{errors.externalId}</small>}
       </label>
 
       <label>
@@ -127,7 +127,7 @@ export function DeviceForm({
           onChange={(e) => setValues((v) => ({ ...v, name: e.target.value }))}
           style={{ display: "block", width: "100%" }}
         />
-        {errors.name && <small style={{ color: "crimson" }}>{errors.name}</small>}
+        {errors.name && <small style={{ color: "var(--color-danger)" }}>{errors.name}</small>}
       </label>
 
       <label>
@@ -143,7 +143,7 @@ export function DeviceForm({
             <option key={t} value={t} />
           ))}
         </datalist>
-        {errors.type && <small style={{ color: "crimson" }}>{errors.type}</small>}
+        {errors.type && <small style={{ color: "var(--color-danger)" }}>{errors.type}</small>}
       </label>
 
       <label>
@@ -159,13 +159,13 @@ export function DeviceForm({
             <option key={z} value={z} />
           ))}
         </datalist>
-        {errors.zone && <small style={{ color: "crimson" }}>{errors.zone}</small>}
+        {errors.zone && <small style={{ color: "var(--color-danger)" }}>{errors.zone}</small>}
       </label>
 
-      <fieldset style={{ border: "1px solid #ddd", padding: "0.5rem" }}>
+      <fieldset style={{ border: "1px solid var(--color-border)", padding: "var(--space-2)" }}>
         <legend>Metadata (optional)</legend>
         {values.metadata.map((row, i) => (
-          <div key={i} style={{ display: "flex", gap: "0.5rem", marginBottom: "0.25rem" }}>
+          <div key={i} style={{ display: "flex", gap: "var(--space-2)", marginBottom: "var(--space-1)" }}>
             <input
               placeholder="key"
               value={row.key}
@@ -190,10 +190,10 @@ export function DeviceForm({
         >
           Add entry
         </button>
-        {errors.metadata && <p style={{ color: "crimson" }}>{errors.metadata}</p>}
+        {errors.metadata && <p style={{ color: "var(--color-danger)" }}>{errors.metadata}</p>}
       </fieldset>
 
-      <div style={{ display: "flex", gap: "0.5rem" }}>
+      <div style={{ display: "flex", gap: "var(--space-2)" }}>
         <button type="submit" disabled={submitting}>
           {mode === "register" ? "Register device" : "Save changes"}
         </button>

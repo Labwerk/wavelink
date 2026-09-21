@@ -1,28 +1,27 @@
 .main {
-  padding: 2rem;
-  font-family: sans-serif;
+  padding: var(--space-6);
   max-width: 720px;
 }
 
 .decommissioned {
   display: inline-block;
-  background: #f3f4f6;
-  color: #374151;
-  border-radius: 999px;
+  background: var(--color-neutral-bg);
+  color: var(--color-decommissioned);
+  border-radius: var(--radius-pill);
   padding: 0.1rem 0.6rem;
   font-size: 0.8rem;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 .staleBadge {
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: #92400e;
-  background: #fef3c7;
-  border-radius: 999px;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+  border-radius: var(--radius-pill);
   padding: 0.15rem 0.6rem;
   width: fit-content;
 }

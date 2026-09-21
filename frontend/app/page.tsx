@@ -11,17 +11,17 @@ import { DeviceGrid, type GroupBy } from "../components/DeviceGrid";
 const GROUP_BY_OPTIONS: readonly GroupBy[] = ["none", "zone", "type", "status"];
 
 // The proxy (frontend/proxy.ts) already sends signed-out visitors to /signin
-// (R1); the signed-in header (email/role, sign-out, admin/devices links)
-// lives in `SiteHeader` (frontend/app/SiteHeader.tsx), rendered from the
-// root layout so it's shared with the device registry at /devices instead
-// of duplicated here. Device registration/editing/decommissioning is that
+// (R1); the signed-in identity, sign-out and role-filtered navigation live in
+// `AppShell` (frontend/components/shell), rendered from the root layout so
+// they are shared with every other page instead of duplicated here. Device
+// registration/editing/decommissioning is that
 // registry's job (explicit non-goal — specs/live-telemetry-view/spec.md);
 // this page is read-only live status.
 export default function LiveOverviewPage() {
   // useSearchParams requires a Suspense boundary above it so the rest of the
   // route can still be prerendered (see frontend/AGENTS.md — Next 16 docs).
   return (
-    <Suspense fallback={<main style={{ padding: "2rem" }}>Loading…</main>}>
+    <Suspense fallback={<main style={{ padding: "var(--space-6)" }}>Loading…</main>}>
       <Overview />
     </Suspense>
   );
@@ -71,7 +71,7 @@ function Overview() {
   });
 
   return (
-    <main style={{ padding: "2rem", fontFamily: "sans-serif" }}>
+    <main style={{ padding: "var(--space-6)" }}>
       <h1>Devices</h1>
       {devices === undefined && <p>Loading…</p>}
       {devices?.length === 0 && <p>No active devices yet. Start the simulator to seed data.</p>}
@@ -84,7 +84,7 @@ function Overview() {
             value={filterValue}
             onChange={(next) => updateParams(next)}
           />
-          <div style={{ marginBottom: "1rem", fontSize: "0.85rem" }}>
+          <div style={{ marginBottom: "var(--space-4)", fontSize: "var(--text-sm)" }}>
             <label>
               Group by:{" "}
               <select
