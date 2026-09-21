@@ -161,10 +161,12 @@ npm run dev
 ```
 
 > ⚠️ The simulator does **not** register devices, since `devices.register` is admin-only.
-> Sign in as your admin first and register `sim-cnc-01`, `sim-agv-01` and `sim-arm-01` via
-> **Register device**. (Telemetry posted for a device that doesn't exist yet is rejected
-> with reason `unknown_device` and recorded — not stored, but not silently dropped either;
-> see [Ingestion](#ingestion).)
+> Sign in as your admin first, open **Devices** in the header nav, and register
+> `sim-cnc-01`, `sim-agv-01` and `sim-arm-01` via **Register device**. (Telemetry posted
+> for a device that doesn't exist yet is rejected with reason `unknown_device` and
+> recorded — not stored, but not silently dropped either; see [Ingestion](#ingestion).)
+> The live-updating dashboard itself is at `/` — device registration and management is
+> deliberately a separate page (`/devices`), out of this feature's scope.
 
 That's it for day-to-day development. Use **Docker deployment** below only when you need to test the self-hosted path itself.
 

@@ -11,7 +11,8 @@
     "dev:backend": "convex dev",
     "dev:frontend": "npm run dev --workspace=frontend",
     "dev:simulator": "npm run dev --workspace=gateway/simulator",
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p backend/tsconfig.json && tsc --noEmit -p backend/tsconfig.test.json"
   },
   "dependencies": {
     "@auth/core": "^0.41.3",

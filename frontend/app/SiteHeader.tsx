@@ -36,13 +36,14 @@ export function SiteHeader() {
         fontFamily: "sans-serif",
       }}
     >
-      <Link href="/devices" style={{ fontWeight: "bold", textDecoration: "none", color: "inherit" }}>
+      <Link href="/" style={{ fontWeight: "bold", textDecoration: "none", color: "inherit" }}>
         Wavelink
       </Link>
       <div style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
         <span style={{ color: "#666" }}>
           Signed in as {me.email} ({me.role})
         </span>
+        <Link href="/devices">Devices</Link>
         {canManageUsers && <Link href="/admin/users">Manage users</Link>}
         <button onClick={() => void handleSignOut()}>Sign out</button>
       </div>

@@ -1,0 +1,20 @@
+{
+  /* Typechecks backend/**\/*.test.ts + testUtils.ts, which backend/tsconfig.json
+   * deliberately excludes (they use `import.meta.glob`, a Vite/vitest-only
+   * extension that isn't part of the Convex function-bundler's environment
+   * and shouldn't gate `npx convex dev`'s push-time typecheck). Run with:
+   *   npx tsc --noEmit -p backend/tsconfig.test.json
+   */
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // "node" alongside "vite/client": setting `types` explicitly drops
+    // the default auto-inclusion of every `@types/*` package, and test
+    // files transitively reach backend/lib/provisioning.ts's
+    // `process.env` via `./_generated/api`'s per-module type imports
+    // (real Convex codegen shapes `api.ts` the same way, so this isn't
+    // specific to the hand-reproduced copy here).
+    "types": ["vite/client", "node"]
+  },
+  "include": ["./**/*.test.ts", "./testUtils.ts"],
+  "exclude": ["./_generated"]
+}
