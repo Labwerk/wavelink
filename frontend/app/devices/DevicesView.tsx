@@ -64,10 +64,18 @@ export function DevicesView() {
     { initialNumItems: PAGE_SIZE },
   );
   const facets = useQuery(api.devices.facets, filterArgs);
+  // Unfiltered, for the register/edit form's zone/type suggestions — a new or
+  // edited device isn't constrained by whatever the list happens to be
+  // filtered to right now, so its suggestions shouldn't be either (unlike
+  // zoneChoices/typeChoices below, which intentionally reflect the active
+  // filter so the dropdowns never offer a combination with zero results).
+  const allFacets = useQuery(api.devices.facets, {});
   const registerDevice = useMutation(api.devices.register);
 
   const zoneChoices = facets?.zones.map((z) => z.value) ?? [];
   const typeChoices = facets?.types.map((t) => t.value) ?? [];
+  const allZoneChoices = allFacets?.zones.map((z) => z.value) ?? [];
+  const allTypeChoices = allFacets?.types.map((t) => t.value) ?? [];
 
   async function handleRegister(values: DeviceFormValues) {
     await registerDevice({
@@ -196,8 +204,8 @@ export function DevicesView() {
             <h2>Register device</h2>
             <DeviceForm
               mode="register"
-              zoneSuggestions={zoneChoices}
-              typeSuggestions={typeChoices}
+              zoneSuggestions={allZoneChoices}
+              typeSuggestions={allTypeChoices}
               submitting={false}
               onSubmit={handleRegister}
               onCancel={() => setShowRegister(false)}
@@ -207,8 +215,8 @@ export function DevicesView() {
           <DeviceDetail
             deviceId={selectedId}
             isAdmin={isAdmin}
-            zoneSuggestions={zoneChoices}
-            typeSuggestions={typeChoices}
+            zoneSuggestions={allZoneChoices}
+            typeSuggestions={allTypeChoices}
           />
         ) : (
           <p>Select a device.</p>
