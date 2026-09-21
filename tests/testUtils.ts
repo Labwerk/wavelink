@@ -10,6 +10,17 @@ import type { DataModel, Id } from "../backend/_generated/dataModel";
 export type Role = "viewer" | "operator" | "maintenance" | "admin";
 export type Test = TestConvexForDataModel<DataModel>;
 
+export const ALL_ROLES: Role[] = ["viewer", "operator", "maintenance", "admin"];
+export const NON_ADMIN_ROLES: Role[] = ["viewer", "operator", "maintenance"];
+
+// The single source of truth for which `backend/devices.ts` exports are
+// admin-gated (`device.manage`) public mutations/queries (spec R17, R31).
+// `tests/devices.test.ts` cross-checks its own gating matrix against these
+// lists (so they can't silently drift from what's actually gated) and proves
+// each one denies every non-admin role and allows admin.
+export const ADMIN_GATED_MUTATIONS = ["register", "update", "decommission", "reactivate"] as const;
+export const ADMIN_GATED_QUERIES = ["changeHistory"] as const;
+
 /**
  * Inserts a `users` row directly (bypassing the real Convex Auth sign-in
  * flow, which needs JWT signing keys not available in this mock

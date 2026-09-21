@@ -1,6 +1,17 @@
 services:
   backend:
-    image: ghcr.io/get-convex/convex-backend:latest
+    # Pinned to the digest `latest` resolved to as of 2026-09-20 (plan.md's
+    # Risks section: "latest is not reproducible"). Resolved via GHCR's
+    # manifest API (reachable even in network-restricted environments where
+    # the blob-storage CDN pkg-containers.githubusercontent.com is blocked):
+    #   TOKEN="$(curl -sS "https://ghcr.io/token?scope=repository:get-convex/convex-backend:pull" | jq -r .token)"
+    #   curl -sS -H "Authorization: Bearer <TOKEN>" \  # substitute the value from the line above
+    #     -H "Accept: application/vnd.oci.image.index.v1+json" \
+    #     "https://ghcr.io/v2/get-convex/convex-backend/manifests/latest" -D - -o /dev/null \
+    #     | grep docker-content-digest
+    # To move to a newer release, re-run the above against the desired tag
+    # and update the digest below.
+    image: ghcr.io/get-convex/convex-backend@sha256:1b0dcd93a3d126400d16e256aea1106a2ee9538882dda545d2c979f28cff1483
     ports:
       - "3210:3210"
       - "3211:3211"
@@ -68,9 +79,12 @@ services:
     working_dir: /repo
     environment:
       - CONVEX_SELF_HOSTED_URL=http://backend:3210
-      # Forwarded onto the Convex deployment below (they are read by backend
-      # functions via process.env, so they must live on the deployment).
-      - INGEST_SERVICE_TOKEN=${INGEST_SERVICE_TOKEN:-}
+      # Read here so the command below can push these as *deployment* env
+      # vars (see the `npx convex env set` lines) — setting them directly on
+      # the `backend` service's environment would NOT work: on self-hosted
+      # Convex, functions read deployment env vars via `process.env`, which
+      # are distinct from the backend container's own OS env.
+      - INGEST_TOKENS=${INGEST_TOKENS:-}
       - INITIAL_ADMIN_EMAIL=${INITIAL_ADMIN_EMAIL:-}
     volumes:
       - .:/repo
@@ -90,11 +104,17 @@ services:
         rm -f /repo/.env.local
         until [ -f /convex-data/admin_key.txt ]; do sleep 1; done
         export CONVEX_SELF_HOSTED_ADMIN_KEY=$(cat /convex-data/admin_key.txt)
-        # Auth deployment settings (README, "Authentication"). Only set when
-        # provided, so a value set by hand on the deployment is never blanked.
-        if [ -n "$$INGEST_SERVICE_TOKEN" ]; then
-          npx convex env set INGEST_SERVICE_TOKEN "$$INGEST_SERVICE_TOKEN"
+        # Double dollar signs below (not single) because docker compose
+        # interpolates the whole file, including this multi-line command
+        # block, before the shell ever sees it — doubling is compose's escape
+        # for a literal single dollar sign that should be resolved by the
+        # container's shell (from the `environment:` list above) instead of
+        # by compose itself at file-parse time. Only set when provided, so a
+        # value set by hand on the deployment is never blanked.
+        if [ -n "$$INGEST_TOKENS" ]; then
+          npx convex env set INGEST_TOKENS "$$INGEST_TOKENS"
         fi
+        # Auth deployment settings (README, "Authentication").
         if [ -n "$$INITIAL_ADMIN_EMAIL" ]; then
           npx convex env set INITIAL_ADMIN_EMAIL "$$INITIAL_ADMIN_EMAIL"
         fi
@@ -126,13 +146,12 @@ services:
     build:
       context: ./gateway/simulator
     environment:
-      # Container-to-container URL of the HTTP-actions (site) origin, port
-      # 3211 - NOT the 3210 API port. The simulator posts to
-      # <site URL>/ingest/telemetry with the service token, which must
-      # equal INGEST_SERVICE_TOKEN set on the Convex deployment.
-      - CONVEX_SITE_URL=http://backend:3211
-      - INGEST_SERVICE_TOKEN=${INGEST_SERVICE_TOKEN:-}
       - SIMULATOR_INTERVAL_MS=${SIMULATOR_INTERVAL_MS:-2000}
+      # Container-to-container HTTP Actions origin (`.site`, port 3211) —
+      # where the ingestion endpoint lives (telemetry-ingestion R1).
+      - WAVELINK_INGEST_URL=http://backend:3211/ingest/readings
+      - WAVELINK_INGEST_TOKEN=${WAVELINK_INGEST_TOKEN:-}
+      - WAVELINK_MAX_BATCH=${WAVELINK_MAX_BATCH:-50}
     volumes:
       - ./gateway/simulator:/simulator
       - /simulator/node_modules

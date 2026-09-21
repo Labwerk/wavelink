@@ -280,14 +280,15 @@ describe("users.setActive (R7, R11)", () => {
     const t = convexTest(schema, modules);
     const { as: admin, userId: adminId } = await createUserFixture(t, "admin");
     const { as: target, userId: targetId } = await createUserFixture(t, "operator");
-    await expect(target.query(api.devices.listActive, {})).resolves.toBeDefined();
+    const listArgs = { paginationOpts: { numItems: 10, cursor: null } };
+    await expect(target.query(api.devices.list, listArgs)).resolves.toBeDefined();
 
     await admin.mutation(api.users.setActive, { userId: targetId, isActive: false });
-    await expect(target.query(api.devices.listActive, {})).rejects.toThrow(NOT_AUTHORIZED);
+    await expect(target.query(api.devices.list, listArgs)).rejects.toThrow(NOT_AUTHORIZED);
     await expect(target.query(api.users.me, {})).resolves.toBeNull();
 
     await admin.mutation(api.users.setActive, { userId: targetId, isActive: true });
-    await expect(target.query(api.devices.listActive, {})).resolves.toBeDefined();
+    await expect(target.query(api.devices.list, listArgs)).resolves.toBeDefined();
 
     const log = await admin.query(api.audit.list, {});
     expect(log.map((l) => l.action)).toEqual(["user.setActive", "user.setActive"]);

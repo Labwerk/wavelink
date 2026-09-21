@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import { setupTest } from "./testUtils";
 import { api } from "./_generated/api";
 import { NOT_AUTHORIZED } from "./lib/auth";
+import { normalizeExternalIdKey } from "./lib/validation";
 import { createUserFixture } from "../tests/testUtils";
 
 // `data.read` is the minimum-role capability every `liveView.*` query
@@ -20,19 +21,21 @@ async function seedDevice(
     zone: string;
     status: "online" | "offline" | "unknown";
     lastSeenAt: number;
-    isActive: boolean;
+    lifecycle: "in_service" | "decommissioned";
     metadata: Record<string, string>;
   }> = {},
 ) {
+  const externalId = overrides.externalId ?? "dev-1";
   return t.run((ctx) =>
     ctx.db.insert("devices", {
-      externalId: overrides.externalId ?? "dev-1",
+      externalId,
+      externalIdKey: normalizeExternalIdKey(externalId),
       name: overrides.name ?? "Device 1",
       type: overrides.type ?? "cnc-mill",
       zone: overrides.zone,
       status: overrides.status ?? "online",
       lastSeenAt: overrides.lastSeenAt,
-      isActive: overrides.isActive ?? true,
+      lifecycle: overrides.lifecycle ?? "in_service",
       metadata: overrides.metadata,
     }),
   );
@@ -85,8 +88,8 @@ describe("liveView.overview", () => {
 
   test("excludes decommissioned devices (R1)", async () => {
     const t = setupTest();
-    await seedDevice(t, { externalId: "active-1", isActive: true });
-    await seedDevice(t, { externalId: "gone-1", isActive: false });
+    await seedDevice(t, { externalId: "active-1", lifecycle: "in_service" });
+    await seedDevice(t, { externalId: "gone-1", lifecycle: "decommissioned" });
 
     const rows = await (await authed(t)).query(api.liveView.overview, {});
     expect(rows.map((r: { externalId: string }) => r.externalId)).toEqual(["active-1"]);
@@ -151,11 +154,11 @@ describe("liveView.deviceSnapshot", () => {
 
   test("still returns a decommissioned device, labelled, instead of null (R3 edge case)", async () => {
     const t = setupTest();
-    const deviceId = await seedDevice(t, { isActive: false });
+    const deviceId = await seedDevice(t, { lifecycle: "decommissioned" });
 
     const snapshot = await (await authed(t)).query(api.liveView.deviceSnapshot, { deviceId });
     expect(snapshot).not.toBeNull();
-    expect(snapshot!.device.isActive).toBe(false);
+    expect(snapshot!.device.lifecycle).toBe("decommissioned");
   });
 });
 

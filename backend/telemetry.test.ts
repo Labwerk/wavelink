@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { setupTest } from "./testUtils";
 import { api } from "./_generated/api";
+import { normalizeExternalIdKey } from "./lib/validation";
 import { createUserFixture } from "../tests/testUtils";
 
 // Auth behavior (unauthenticated/per-role) for `telemetry.latestForDevice`
@@ -16,10 +17,11 @@ async function seedDevice(t: ReturnType<typeof setupTest>) {
   return t.run((ctx) =>
     ctx.db.insert("devices", {
       externalId: "dev-1",
+      externalIdKey: normalizeExternalIdKey("dev-1"),
       name: "Device 1",
       type: "cnc-mill",
       status: "online",
-      isActive: true,
+      lifecycle: "in_service",
     }),
   );
 }

@@ -34,13 +34,14 @@ export const overview = authedQuery({
   capability: "data.read",
   args: {},
   handler: async (ctx) => {
-    // Indexed on isActive directly (schema.ts: "by_isActive") rather than
-    // scanning by_zone_and_status and filtering post-hoc — R7's zone/status
-    // filtering happens client-side over this one subscribed list, so no
-    // index ordering on those fields is needed here.
+    // Indexed on lifecycle directly (device-registry's schema.ts:
+    // "by_lifecycle_status_lastSeenAt", narrowed to just its first field
+    // here) rather than scanning by zone/status and filtering post-hoc —
+    // R7's zone/status filtering happens client-side over this one
+    // subscribed list, so no index ordering on those fields is needed here.
     const devices = await ctx.db
       .query("devices")
-      .withIndex("by_isActive", (q) => q.eq("isActive", true))
+      .withIndex("by_lifecycle_status_lastSeenAt", (q) => q.eq("lifecycle", "in_service"))
       .take(MAX_OVERVIEW_DEVICES);
 
     return Promise.all(
@@ -70,8 +71,8 @@ export const overview = authedQuery({
  * Device detail view (R3, R6, R8): all of a device's current metric values —
  * the union of its configured key metrics and whatever metric names show up
  * in its recent telemetry, each resolved exactly. A decommissioned device
- * (isActive: false) still renders here, labelled, rather than 404ing — it
- * just never appears in `overview`'s list.
+ * (lifecycle: "decommissioned") still renders here, labelled, rather than
+ * 404ing — it just never appears in `overview`'s list.
  */
 export const deviceSnapshot = authedQuery({
   capability: "data.read",
@@ -104,7 +105,7 @@ export const deviceSnapshot = authedQuery({
         zone: device.zone,
         status: device.status,
         lastSeenAt: device.lastSeenAt,
-        isActive: device.isActive,
+        lifecycle: device.lifecycle,
         metadata: device.metadata,
         expectedIntervalMs: expectedIntervalMsFor(device),
       },
