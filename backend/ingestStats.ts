@@ -2,6 +2,23 @@ import { v } from "convex/values";
 import { internalMutation, internalQuery } from "./_generated/server";
 import { loadIngestConfig } from "./lib/ingestConfig";
 
+// Kept in sync with `ingestRejections.reason` in `backend/schema.ts` — used
+// by `rejectionsByReason` below so its `reason` arg is typed as the same
+// literal union as the indexed field, not a bare `string`.
+const rejectionReasonValidator = v.union(
+  v.literal("missing_field"),
+  v.literal("unexpected_field"),
+  v.literal("wrong_type"),
+  v.literal("timestamp_too_far_future"),
+  v.literal("timestamp_too_old"),
+  v.literal("value_not_finite"),
+  v.literal("external_id_too_long"),
+  v.literal("metric_too_long"),
+  v.literal("string_value_too_long"),
+  v.literal("unknown_device"),
+  v.literal("inactive_device"),
+);
+
 // Per-minute ingestion counters (telemetry-ingestion R25) and the retention
 // cron's cleanup. Kept as `internalQuery`/`internalMutation` — no public
 // read surface yet — per plan.md's "Observability read path" decision: the
@@ -135,6 +152,24 @@ export const summary = internalQuery({
     }
 
     return totals;
+  },
+});
+
+const REJECTIONS_PAGE_SIZE = 200;
+
+/** Drill-down for R25: individual rejected readings for one reason within
+ * `[fromTs, toTs)`, newest first, via the `by_reason_and_ts` index — the
+ * per-reading detail behind `summary`'s aggregate `rejectedByReason` counts. */
+export const rejectionsByReason = internalQuery({
+  args: { reason: rejectionReasonValidator, fromTs: v.number(), toTs: v.number() },
+  handler: async (ctx, { reason, fromTs, toTs }) => {
+    return ctx.db
+      .query("ingestRejections")
+      .withIndex("by_reason_and_ts", (q) =>
+        q.eq("reason", reason).gte("ts", fromTs).lt("ts", toTs),
+      )
+      .order("desc")
+      .take(REJECTIONS_PAGE_SIZE);
   },
 });
 

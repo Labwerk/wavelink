@@ -203,8 +203,10 @@ and reviewer reference them.
   rejected readings never advance a device's freshness.
 - **R20** — A device's last-seen time never moves backwards: an accepted reading
   older than the device's current last-seen time is stored as telemetry but does
-  not regress the device's freshness signal. (The current implementation patches
-  freshness from every reading in order, so late-arriving data rewinds it.)
+  not regress the device's freshness signal. (The pre-feature implementation
+  patched freshness from every reading in order, so late-arriving data could
+  rewind it — this requirement closes that gap; see Acceptance criteria below
+  and `backend/lib/ingestValidation.ts`'s `computeFreshnessPatches`.)
 
 ### Rate limiting
 

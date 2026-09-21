@@ -394,6 +394,12 @@ Accepted/rejected/throttled counts are queryable (not yet a public dashboard —
 npx convex run ingestStats:summary '{"fromTs": 0, "toTs": 9999999999999}'
 ```
 
+To drill into the individual readings behind one of `summary`'s `rejectedByReason` counts (e.g. everything rejected as `inactive_device` in a window):
+
+```sh
+npx convex run ingestStats:rejectionsByReason '{"reason": "inactive_device", "fromTs": 0, "toTs": 9999999999999}'
+```
+
 ## Authentication
 
 Signing in is required to see anything. Accounts are email + password via

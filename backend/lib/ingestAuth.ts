@@ -45,9 +45,9 @@ export function parseIngestTokens(raw: string | undefined): IngestTokenEntry[] {
 }
 
 /** Extracts the bearer credential from an `Authorization` header value.
- * Returns `null` only when there is no header at all; a present-but-wrong-shaped
- * header still yields a (non-matching) string so the comparison below runs
- * the same code path either way. */
+ * Returns `""` when there is no header, no `Bearer` scheme, or no token —
+ * never `null` — so a missing/malformed header still yields a (non-matching)
+ * string and the comparison below runs the same code path either way. */
 export function extractBearerToken(authorizationHeader: string | null | undefined): string {
   if (!authorizationHeader) return "";
   const match = /^Bearer\s+(.+)$/i.exec(authorizationHeader.trim());

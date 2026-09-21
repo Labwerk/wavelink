@@ -712,6 +712,14 @@ describe("observability (R25)", () => {
         expect(summary.rejectedByReason.unknown_device).toBeGreaterThanOrEqual(1);
         expect(summary.requestsCredentialFailed).toBe(1);
         expect(summary.requestsRateLimited).toBe(1);
+
+        const drilldown = await t.query(internal.ingestStats.rejectionsByReason, {
+          reason: "unknown_device",
+          fromTs: 0,
+          toTs: Date.now() + 1,
+        });
+        expect(drilldown.length).toBeGreaterThanOrEqual(1);
+        expect(drilldown[0]).toMatchObject({ reason: "unknown_device", externalId: "no-such-device" });
       },
     );
   });
