@@ -15,13 +15,9 @@ export const NON_ADMIN_ROLES: Role[] = ["viewer", "operator", "maintenance"];
 
 // The single source of truth for which `backend/devices.ts` exports are
 // admin-gated (`device.manage`) public mutations/queries (spec R17, R31).
-// Shared between `tests/deviceApiSurface.test.ts` (which structurally scans
-// devices.ts and fails if a new export isn't classified here or anywhere
-// else) and `tests/devices.test.ts` (which proves each of these actually
-// denies every non-admin role and allows admin) — a mutation added to
-// devices.ts without being added here fails the surface scan; one added only
-// here without a matching `capability: "device.manage"` fails the surface
-// scan's gating check.
+// `tests/devices.test.ts` cross-checks its own gating matrix against these
+// lists (so they can't silently drift from what's actually gated) and proves
+// each one denies every non-admin role and allows admin.
 export const ADMIN_GATED_MUTATIONS = ["register", "update", "decommission", "reactivate"] as const;
 export const ADMIN_GATED_QUERIES = ["changeHistory"] as const;
 

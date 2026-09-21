@@ -68,6 +68,7 @@ export function DeviceDetail({
   const isDecommissioned = device.lifecycle === "decommissioned";
 
   async function handleEditSubmit(values: DeviceFormValues) {
+    const hadMetadata = Object.keys(device?.metadata ?? {}).length > 0;
     await updateDevice({
       deviceId,
       name: values.name,
@@ -76,7 +77,10 @@ export function DeviceDetail({
       // The edit form always represents the full metadata set, so an empty
       // list means "clear it" — send {} rather than metadataToRecord's
       // undefined (which `devices.update` reads as "leave unchanged").
-      metadata: metadataToRecord(values.metadata) ?? {},
+      // Only do that when the device actually had metadata to clear;
+      // otherwise omit the field so an untouched, always-empty metadata
+      // section doesn't log a spurious "metadata changed" audit entry.
+      metadata: metadataToRecord(values.metadata) ?? (hadMetadata ? {} : undefined),
     });
     setEditing(false);
   }

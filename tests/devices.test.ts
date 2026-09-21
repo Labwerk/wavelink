@@ -4,7 +4,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { api, internal } from "../backend/_generated/api";
 import { NOT_AUTHORIZED } from "../backend/lib/auth";
 import schema from "../backend/schema";
-import { ADMIN_GATED_MUTATIONS, ALL_ROLES, createUserFixture, NON_ADMIN_ROLES, type Test } from "./testUtils";
+import { ADMIN_GATED_MUTATIONS, ADMIN_GATED_QUERIES, ALL_ROLES, createUserFixture, NON_ADMIN_ROLES, type Test } from "./testUtils";
 
 const modules = import.meta.glob("../backend/**/*.*s");
 
@@ -741,6 +741,10 @@ describe("admin gating (R17, R31)", () => {
       const { as: admin } = await createUserFixture(t, "admin");
       await expect(op.call(admin, deviceId)).resolves.toBeDefined();
     }
+  });
+
+  test("devices.changeHistory matches the ADMIN_GATED_QUERIES list tests/testUtils.ts declares", () => {
+    expect(["changeHistory"]).toEqual([...ADMIN_GATED_QUERIES]);
   });
 
   test("devices.changeHistory is refused for non-admins and succeeds for admin (R31)", async () => {

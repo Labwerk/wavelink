@@ -168,7 +168,10 @@ export function DevicesView() {
           </p>
         )}
 
-        {results.length === 0 && pageStatus !== "LoadingFirstPage" && <p>No devices match these filters.</p>}
+        {/* Some filters are applied residually after the server-side page fetch
+            (facets(), backend/devices.ts), so an empty page doesn't mean no
+            matches exist elsewhere — only "Exhausted" (no more pages left) does. */}
+        {results.length === 0 && pageStatus === "Exhausted" && <p>No devices match these filters.</p>}
 
         {groupedEntries
           ? groupedEntries.map(([groupValue, devices]) => (

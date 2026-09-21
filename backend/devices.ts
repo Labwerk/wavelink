@@ -1,5 +1,5 @@
 import { paginationOptsValidator } from "convex/server";
-import { ConvexError, v } from "convex/values";
+import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
 import { internalMutation, type QueryCtx } from "./_generated/server";
@@ -13,8 +13,11 @@ import {
   trimToUndefinedIfBlank,
   validateMetadataInto,
   validateRequiredTrimmed,
+  validationError,
   type FieldError,
 } from "./lib/validation";
+
+const DEVICE_NOT_FOUND = () => validationError([{ field: "_form", message: "Device not found" }]);
 
 // Role matrix (spec `specs/auth-roles/spec.md` "Users & roles"): reads need
 // `data.read` (all four roles); register/update/decommission/reactivate/
@@ -303,7 +306,7 @@ export const update = authedMutation({
   handler: async (ctx, args) => {
     const device = await ctx.db.get(args.deviceId);
     if (!device) {
-      throw new ConvexError({ message: "Device not found" });
+      throw DEVICE_NOT_FOUND();
     }
 
     const errors: FieldError[] = [];
@@ -356,7 +359,7 @@ export const decommission = authedMutation({
   handler: async (ctx, { deviceId }) => {
     const device = await ctx.db.get(deviceId);
     if (!device) {
-      throw new ConvexError({ message: "Device not found" });
+      throw DEVICE_NOT_FOUND();
     }
     if (device.lifecycle === "decommissioned") {
       return deviceId; // Idempotent no-op: nothing changed, nothing to audit (R30).
@@ -386,7 +389,7 @@ export const reactivate = authedMutation({
   handler: async (ctx, { deviceId }) => {
     const device = await ctx.db.get(deviceId);
     if (!device) {
-      throw new ConvexError({ message: "Device not found" });
+      throw DEVICE_NOT_FOUND();
     }
     if (device.lifecycle === "in_service") {
       return deviceId; // Idempotent no-op.
