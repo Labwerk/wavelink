@@ -221,6 +221,8 @@ describe("devices.register uniqueness and normalization (R19, R20)", () => {
     const deviceId = await registerDevice(t, { externalId: "sim-cnc-01" });
 
     await t.mutation(internal.ingest.recordBatch, {
+      sourceId: "test",
+      batchId: "test-batch",
       readings: [{ externalId: "SIM-CNC-01", ts: Date.now(), metric: "temp", value: 42 }],
     });
 
@@ -357,6 +359,8 @@ describe("devices lifecycle (R14, R24, R25, R27, R28)", () => {
       metadata: { fw: "9.9" },
     });
     await t.mutation(internal.ingest.recordBatch, {
+      sourceId: "test",
+      batchId: "test-batch",
       readings: [{ externalId: "robot-07", ts: Date.now(), metric: "temp", value: 10 }],
     });
 
@@ -427,6 +431,8 @@ describe("devices lifecycle (R14, R24, R25, R27, R28)", () => {
     const { as: admin } = await createUserFixture(t, "admin");
     const deviceId = await registerDevice(t, { externalId: "robot-09" });
     await t.mutation(internal.ingest.recordBatch, {
+      sourceId: "test",
+      batchId: "test-batch",
       readings: [{ externalId: "robot-09", ts: Date.now(), metric: "temp", value: 1 }],
     });
     await admin.mutation(api.devices.decommission, { deviceId });
@@ -453,6 +459,8 @@ describe("connectivity state (R1, R2, R3, R5)", () => {
     const unknownId = await registerDevice(t, { externalId: "fx-unknown" });
 
     await t.mutation(internal.ingest.recordBatch, {
+      sourceId: "test",
+      batchId: "test-batch",
       readings: [
         { externalId: "fx-online", ts: Date.now(), metric: "temp", value: 1 },
         { externalId: "fx-offline", ts: Date.now(), metric: "temp", value: 1 },
@@ -464,6 +472,8 @@ describe("connectivity state (R1, R2, R3, R5)", () => {
     await t.mutation(internal.devices.sweepOffline, {});
     // Refresh the "online" fixture just under the wire so it stays online.
     await t.mutation(internal.ingest.recordBatch, {
+      sourceId: "test",
+      batchId: "test-batch",
       readings: [{ externalId: "fx-online", ts: Date.now(), metric: "temp", value: 2 }],
     });
 
@@ -485,6 +495,8 @@ describe("connectivity state (R1, R2, R3, R5)", () => {
     const deviceId = await registerDevice(t, { externalId: "fx-transition" });
 
     await t.mutation(internal.ingest.recordBatch, {
+      sourceId: "test",
+      batchId: "test-batch",
       readings: [{ externalId: "fx-transition", ts: Date.now(), metric: "temp", value: 1 }],
     });
     expect((await admin.query(api.devices.get, { deviceId }))?.status).toBe("online");
@@ -505,6 +517,8 @@ describe("connectivity state (R1, R2, R3, R5)", () => {
     const deviceId = await registerDevice(t, { externalId: "fx-short-window" });
 
     await t.mutation(internal.ingest.recordBatch, {
+      sourceId: "test",
+      batchId: "test-batch",
       readings: [{ externalId: "fx-short-window", ts: Date.now(), metric: "temp", value: 1 }],
     });
     vi.advanceTimersByTime(6_000);
@@ -519,6 +533,8 @@ describe("connectivity state (R1, R2, R3, R5)", () => {
     const { as: admin } = await createUserFixture(t, "admin");
     const deviceId = await registerDevice(t, { externalId: "fx-consistent" });
     await t.mutation(internal.ingest.recordBatch, {
+      sourceId: "test",
+      batchId: "test-batch",
       readings: [{ externalId: "fx-consistent", ts: Date.now(), metric: "temp", value: 1 }],
     });
     vi.advanceTimersByTime(61_000);
@@ -581,6 +597,8 @@ describe("filtering and grouping (R7, R8, R9, R10, R11)", () => {
     const device = await admin.query(api.devices.get, { deviceId: zoneAndOffline });
     vi.useFakeTimers();
     await t.mutation(internal.ingest.recordBatch, {
+      sourceId: "test",
+      batchId: "test-batch",
       readings: [{ externalId: device!.externalId, ts: Date.now(), metric: "t", value: 1 }],
     });
     vi.advanceTimersByTime(61_000);
@@ -631,6 +649,8 @@ describe("filtering and grouping (R7, R8, R9, R10, R11)", () => {
     const { as: admin } = await createUserFixture(t, "admin");
     const deviceId = await registerDevice(t, { externalId: "fx-leaves" });
     await t.mutation(internal.ingest.recordBatch, {
+      sourceId: "test",
+      batchId: "test-batch",
       readings: [{ externalId: "fx-leaves", ts: Date.now(), metric: "t", value: 1 }],
     });
 
