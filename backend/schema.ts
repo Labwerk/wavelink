@@ -13,7 +13,8 @@ export default defineSchema({
   ...authTables,
 
   devices: defineTable({
-    externalId: v.string(),
+    externalId: v.string(), // Trimmed, as entered. Displayed. Immutable after registration (R21).
+    externalIdKey: v.string(), // externalId.trim().toLowerCase() — the uniqueness key (R20). Never shown.
     name: v.string(),
     type: v.string(),
     zone: v.optional(v.string()),
@@ -23,11 +24,21 @@ export default defineSchema({
       v.literal("unknown"),
     ),
     lastSeenAt: v.optional(v.number()),
-    isActive: v.boolean(),
+    // Lifecycle, distinct from connectivity `status` (R28). Replaces the old
+    // `isActive: boolean` — see specs/device-registry/plan.md "Schema migration"
+    // and devices.backfillLifecycle for migrating a deployment with legacy rows.
+    lifecycle: v.union(v.literal("in_service"), v.literal("decommissioned")),
+    decommissionedAt: v.optional(v.number()),
+    decommissionedBy: v.optional(v.id("users")),
     metadata: v.optional(v.record(v.string(), v.string())),
+    // R26: telemetry received for a decommissioned device is refused but observable.
+    rejectedReadingCount: v.optional(v.number()),
+    lastRejectedReadingAt: v.optional(v.number()),
   })
-    .index("by_externalId", ["externalId"])
-    .index("by_zone_and_status", ["zone", "status"]),
+    .index("by_externalIdKey", ["externalIdKey"])
+    .index("by_lifecycle_status_lastSeenAt", ["lifecycle", "status", "lastSeenAt"])
+    .index("by_lifecycle_and_zone", ["lifecycle", "zone"])
+    .index("by_lifecycle_and_type", ["lifecycle", "type"]),
 
   telemetry: defineTable({
     deviceId: v.id("devices"),
@@ -88,16 +99,30 @@ export default defineSchema({
     .index("by_email", ["email"])
     .index("by_role", ["role"]),
 
-  // Attribution (R11): appended in the same mutation as every state change.
+  // General audit trail (R11/R29/R30/R31). Attribution (R11): appended in the
+  // same mutation as every state change. `actorId` is always the
+  // authenticated user who acted, EXCEPT for break-glass operations run with
+  // the deployment admin key (no user), which carry `details.via` instead.
+  // `targetTable`/`targetId` are generic (by convention, not a typed
+  // reference) so any feature can reuse this table. `details` holds simple
+  // key/value context (e.g. a role change's from/to); `changes` holds a
+  // structured per-field before/after diff for edits touching several fields
+  // at once (e.g. a device edit) — see `lib/audit.ts` `diffFields`.
   auditLog: defineTable({
-    // Always the authenticated user who acted. Absent ONLY for break-glass
-    // operations run with the deployment admin key, which have no user
-    // (currently `user.setPassword`); those rows carry `details.via`.
     actorId: v.optional(v.id("users")),
     action: v.string(),
     targetTable: v.optional(v.string()),
     targetId: v.optional(v.string()),
     details: v.optional(v.record(v.string(), v.string())),
+    changes: v.optional(
+      v.array(
+        v.object({
+          field: v.string(),
+          before: v.optional(v.string()),
+          after: v.optional(v.string()),
+        }),
+      ),
+    ),
     at: v.number(),
   })
     .index("by_at", ["at"])

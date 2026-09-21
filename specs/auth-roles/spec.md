@@ -146,11 +146,12 @@ outcome):
   a newly created account starts at the least-privileged role (viewer) until an
   admin promotes it.
 - **Maintenance role in v1** — all four roles ship now, per R2.
+- **Session expiry policy** — idle timeout of 8 hours plus a 7-day hard cap, with a
+  session cookie (signed out on browser close). Documented in `plan.md`'s "Decisions"
+  table and README "Session policy"; implemented in `backend/auth.ts` and
+  `frontend/proxy.ts`.
+- **Role-change notification** — no notification channel in v1. `users.me` is a live
+  query, so the effect is visible within about a second without a reload, and every
+  role/activation change is written to the audit log.
 
-Still open:
-
-- **Session expiry policy** — idle timeout vs fixed lifetime, and the duration.
-  R10 holds either way; the chosen policy must be documented so "until expiry"
-  is testable.
-- **Role-change notification** — is a user told when their role changes? Not
-  required by any R above; decide before it becomes a support question.
+No open questions remain.

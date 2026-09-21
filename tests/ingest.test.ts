@@ -1,5 +1,10 @@
+// R2, R12, R20, R26: ingest authenticates with a service token at the HTTP
+// layer, resolves devices by normalized externalIdKey, and never resurrects
+// a decommissioned device's state.
+
 import { convexTest } from "convex-test";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { api, internal } from "../backend/_generated/api";
 import schema from "../backend/schema";
 import { isValidServiceToken } from "../backend/lib/serviceAuth";
 import { createUserFixture, type Test } from "./testUtils";
@@ -10,14 +15,15 @@ const ingestSource = (
 )["../backend/ingest.ts"];
 const TOKEN = "test-ingest-token-123";
 
-async function seedDevice(t: Test) {
+async function seedDevice(t: Test, externalId = "sim-1") {
   return t.run((ctx) =>
     ctx.db.insert("devices", {
-      externalId: "sim-1",
+      externalId,
+      externalIdKey: externalId.trim().toLowerCase(),
       name: "Sim 1",
       type: "cnc-mill",
       status: "unknown",
-      isActive: true,
+      lifecycle: "in_service",
     }),
   );
 }
@@ -132,5 +138,108 @@ describe("POST /ingest/telemetry (R12)", () => {
       .join("\n");
     expect(src).toContain("export const recordBatch = internalMutation(");
     expect(src).not.toContain("export const recordBatch = mutation(");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Device-matching business logic (R2, R20, R26) — exercised by calling the
+// internal mutation directly, since it's the device-matching/decommission
+// behavior under test here, not the HTTP-layer auth already covered above.
+// ---------------------------------------------------------------------------
+
+describe("ingest.recordBatch device matching (R2, R20, R26)", () => {
+  test("an unregistered externalId is skipped, not auto-created", async () => {
+    const t = convexTest(schema, modules);
+    await t.mutation(internal.ingest.recordBatch, {
+      readings: [{ externalId: "ghost-01", ts: Date.now(), metric: "t", value: 1 }],
+    });
+    const { as: admin } = await createUserFixture(t, "admin");
+    const list = await admin.query(api.devices.list, {
+      paginationOpts: { numItems: 10, cursor: null },
+    });
+    expect(list.page).toEqual([]);
+  });
+
+  test("telemetry for an in-service device is recorded and flips it online (R2)", async () => {
+    const t = convexTest(schema, modules);
+    const { as: admin } = await createUserFixture(t, "admin");
+    const deviceId = await admin.mutation(api.devices.register, {
+      externalId: "live-01",
+      name: "Live",
+      type: "agv",
+    });
+
+    await t.mutation(internal.ingest.recordBatch, {
+      readings: [{ externalId: "live-01", ts: 1000, metric: "temp", value: 42 }],
+    });
+
+    const device = await admin.query(api.devices.get, { deviceId });
+    expect(device?.status).toBe("online");
+    expect(device?.lastSeenAt).toBe(1000);
+
+    const readings = await admin.query(api.telemetry.latestForDevice, { deviceId });
+    expect(readings).toHaveLength(1);
+  });
+
+  test("telemetry for a decommissioned device is refused: no new telemetry row, lifecycle/status unchanged, and the refusal is observable (R26)", async () => {
+    vi.useFakeTimers();
+    const t = convexTest(schema, modules);
+    const { as: admin } = await createUserFixture(t, "admin");
+    const deviceId = await admin.mutation(api.devices.register, {
+      externalId: "dead-01",
+      name: "Dead",
+      type: "agv",
+    });
+    // Give it prior state so we can prove decommission doesn't touch connectivity.
+    await t.mutation(internal.ingest.recordBatch, {
+      readings: [{ externalId: "dead-01", ts: Date.now(), metric: "t", value: 1 }],
+    });
+    await admin.mutation(api.devices.decommission, { deviceId });
+    const before = await admin.query(api.devices.get, { deviceId });
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await t.mutation(internal.ingest.recordBatch, {
+      readings: [
+        { externalId: "dead-01", ts: Date.now(), metric: "t", value: 2 },
+        { externalId: "dead-01", ts: Date.now(), metric: "t", value: 3 },
+      ],
+    });
+
+    const after = await admin.query(api.devices.get, { deviceId });
+    expect(after?.lifecycle).toBe("decommissioned");
+    expect(after?.status).toBe(before?.status);
+    expect(after?.lastSeenAt).toBe(before?.lastSeenAt);
+    // Observable rather than silently dropped: aggregated once per batch per device.
+    expect(after?.rejectedReadingCount).toBe(2);
+    expect(after?.lastRejectedReadingAt).toBeTypeOf("number");
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+
+    const telemetry = await t.run((ctx) =>
+      ctx.db
+        .query("telemetry")
+        .withIndex("by_device_and_ts", (q) => q.eq("deviceId", deviceId))
+        .collect(),
+    );
+    expect(telemetry).toHaveLength(1); // only the pre-decommission reading
+
+    warnSpy.mockRestore();
+  });
+
+  test("a differently-cased/whitespace externalId still resolves to the registered device (R20)", async () => {
+    const t = convexTest(schema, modules);
+    const { as: admin } = await createUserFixture(t, "admin");
+    const deviceId = await admin.mutation(api.devices.register, {
+      externalId: "case-01",
+      name: "Case",
+      type: "agv",
+    });
+
+    await t.mutation(internal.ingest.recordBatch, {
+      readings: [{ externalId: " CASE-01 ", ts: 5000, metric: "t", value: 1 }],
+    });
+
+    const device = await admin.query(api.devices.get, { deviceId });
+    expect(device?.status).toBe("online");
+    expect(device?.lastSeenAt).toBe(5000);
   });
 });

@@ -63,10 +63,33 @@
 
 ## Apply RBAC to existing functions
 
-- [x] **T9** — Devices and telemetry through the wrappers: reads need `data.read`; register/update/deactivate need `device.manage` and append audit rows.
-  - Files: `backend/devices.ts`, `backend/telemetry.ts`
-  - Satisfies: R1, R3, R5, R6, R11
-  - Acceptance: `tests/devices.test.ts` - all four roles read; viewer/operator/maintenance denied writes; admin allowed; audit rows carry actor and time; forbidden-existing vs non-existent target indistinguishable; deactivated user denied.
+- [x] **T9** — Devices and telemetry through the wrappers: reads need `data.read`; register/update/decommission/reactivate/changeHistory need `device.manage` and append audit rows.
+
+  **Post-merge (device-registry integration):** written against the pre-device-registry
+  `devices.ts` (`listActive`/`get`/`register`/`update`/`deactivate`). By the time this
+  landed, `device-registry` had already shipped a richer `devices.ts` on `main`
+  (paginated `list`, `facets`, `changeHistory`, `decommission`/`reactivate` in place of
+  `deactivate`) plus its own temporary auth seam (`backend/lib/access.ts`). Reconciling
+  the two: every read (`list`/`get`/`facets`) is now `authedQuery({capability:
+  "data.read", ...})`, with an extra `requireCapability(ctx, "device.manage")` check
+  inside `list`/`facets` when `includeDecommissioned` is requested; every write plus
+  `changeHistory` is `authedMutation`/`authedQuery({capability: "device.manage", ...})`;
+  `backend/lib/access.ts`, `DEVICE_REGISTRY_REQUIRE_ADMIN`, and
+  `backend/lib/config.ts`'s `deviceRegistryRequireAdmin()` are deleted. `auditLog` grew
+  an optional `changes: FieldChange[]` field (`lib/audit.ts`) so a multi-field device
+  edit still gets one row with a real per-field before/after, alongside the existing
+  `details` used by the simpler user-management audit entries. `tests/devices.test.ts`
+  is rewritten against the real auth harness (`createUserFixture`/`NOT_AUTHORIZED`
+  instead of the seam's permissive-default env var and `ConvexError`), with a new
+  "unauthenticated caller denied every read and write" case since reads are gated now
+  too. `tests/deviceApiSurface.test.ts` (device-scoped structural scan, a stand-in the
+  seam's own plan.md section said to retire once auth-roles merged) is removed —
+  `tests/denyByDefault.test.ts` already scans `backend/**` including `devices.ts`, and
+  devices.test.ts's own admin-gating matrix proves the *right* capability is enforced
+  per operation, which the structural scan didn't check anyway.
+  - Files: `backend/devices.ts`, `backend/telemetry.ts`, `backend/lib/access.ts` (removed), `backend/lib/config.ts`, `backend/lib/audit.ts`, `backend/schema.ts`, `tests/devices.test.ts`, `tests/deviceApiSurface.test.ts` (removed)
+  - Satisfies: R1, R3, R5, R6, R11, R16/R17/R31 (device-registry)
+  - Acceptance: `tests/devices.test.ts` - all four roles read; viewer/operator/maintenance denied writes; admin allowed; audit rows carry actor and time; forbidden-existing vs non-existent target indistinguishable; deactivated user denied; no remaining references to `requireAdmin`/`getActor`/`access.currentActor`/`DEVICE_REGISTRY_REQUIRE_ADMIN`.
 
 - [x] **T10** — Ingestion behind a service credential: `ingest.recordBatch` is an internal mutation; `POST /ingest/telemetry` checks `Authorization: Bearer $INGEST_SERVICE_TOKEN` (constant-time, fails closed when unset).
   - Files: `backend/ingest.ts`, `backend/http.ts`, `backend/lib/serviceAuth.ts`
@@ -85,10 +108,21 @@
   - Satisfies: R1, R10
   - Acceptance: `tests/proxy.test.ts` (wrapper turns the library's 200+location into a 3xx and keeps cookies; other responses untouched); `next build` lists the Proxy; `next start` + curl: before the fix a request with forged `__convexAuthJWT`/`__convexAuthRefreshToken` cookies got `200` + `location: /signin`, after it gets `307` + `location: /signin` + all three cookies cleared, and following it ends at `/signin` (200); no-cookie requests 307; `/signin` 200. NOT verified against a live backend with a genuinely expired session (needs a running deployment).
 
-- [x] **T13** — Sign-in page (sign-in only, no sign-up toggle); dashboard sign-out; role gating from `me.capabilities`; `/admin/users` (user list, role selector, activate/deactivate, create-user form, audit list) shown only with `user.manage`; audit rows without an actor render as "deployment admin key".
-  - Files: `frontend/app/signin/page.tsx`, `frontend/app/page.tsx`, `frontend/app/admin/users/page.tsx`
+- [x] **T13** — Sign-in page (sign-in only, no sign-up toggle); signed-in header (email/role, sign-out) and role gating from `me.capabilities`; `/admin/users` (user list, role selector, activate/deactivate, create-user form, audit list) shown only with `user.manage`; audit rows without an actor render as "deployment admin key".
+
+  **Post-merge (device-registry integration):** `device-registry` had already replaced
+  `app/page.tsx` with a bare `redirect("/devices")` to its own richer device UI, so the
+  sign-out/role/admin-link header this task built into `app/page.tsx`'s `Dashboard`
+  component would have become dead code. Moved into a new `frontend/app/SiteHeader.tsx`
+  client component, mounted once in `layout.tsx` above `{children}`, so it renders on
+  every authenticated page (`/devices`, `/admin/users`, ...) rather than only the old
+  inline dashboard. `frontend/app/devices/DevicesView.tsx`'s own `isAdmin` (previously
+  `useQuery(api.lib.access.currentActor, {})`, the now-deleted device-registry seam) is
+  swapped to `useQuery(api.users.me)` + `capabilities.includes("device.manage")`, the
+  same capability `DevicesView` already used to gate register/edit/decommission/history.
+  - Files: `frontend/app/signin/page.tsx`, `frontend/app/page.tsx`, `frontend/app/SiteHeader.tsx`, `frontend/app/layout.tsx`, `frontend/app/admin/users/page.tsx`, `frontend/app/devices/DevicesView.tsx`
   - Satisfies: R7, R8, R9, R10
-  - Acceptance: frontend typecheck + `next build` clean. Interactive behaviour NOT exercised in a browser - see T20.
+  - Acceptance: frontend typecheck + `next build` clean; device admin controls (register/edit/decommission/history) still gate correctly on `users.me`. Interactive behaviour NOT exercised in a browser - see T20.
 
 ## Config & docs
 

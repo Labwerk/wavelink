@@ -17,8 +17,8 @@
 | First admin (R13) — **revised in rev 3** | **`internalAction`, reachable only with the deployment admin key** (`npx convex run users:bootstrapAdmin`), with the empty-table and `INITIAL_ADMIN_EMAIL` checks kept as defence in depth. The admin role and its audit row are written **inside the account-creation transaction** | Revision 2 made this a public action gated only on an email address, which is not a secret — anyone reaching a fresh deployment could claim admin first (review issue 1). The admin key already exists in both flows, so this adds no new secret. Rejected: public action + email gate (not a credential), a separate `BOOTSTRAP_TOKEN` env var (a second secret to distribute for no extra safety), manual DB edit (undocumented) |
 | Password recovery (review issue 5) | **Break-glass only**: an `internalAction` (`users:setPassword`, via `modifyAccountCredentials`) runnable with the admin key, audited. No in-app reset, no email flow | Without it, one forgotten admin password bricks the deployment. Reusing the admin-key pattern keeps the public surface unchanged. Rejected: user-facing reset (needs email infra we do not have), README saying "no recovery in v1" (leaves a real lockout with no exit) |
 | Account deactivation (review issue 9) | **Add `users.setActive`** — admin-only, audited, cannot deactivate yourself or the last admin | `isActive` is already read by every check, shown in the UI and covered by tests, but nothing can write it. Rejected: marking the column provisional (leaves dead weight in the enforcement path) |
-| **Session expiry policy (was open — decide here)** | **Idle timeout 8 h + hard cap 7 days + 1 h access token.** `session.inactiveDurationMs = 8 h`, `session.totalDurationMs = 7 d`, `jwt.durationMs` left at the 1 h default. Auth cookie is a **session cookie** (`cookieConfig.maxAge = null`) | 8 h ≈ one shift, so a walked-away-from floor terminal locks itself by the next shift; 7 d forces periodic re-auth. Library defaults are 30 d / 30 d — too long for a dashboard intended to be exposed beyond the local network. Page reload still works (R10), closing the browser signs out. **Confirm before build** |
-| **Role-change notification (was open — decide here)** | **No notification channel in v1.** The effect is immediate and visible instead: `users.me` is a live Convex query, so the acting user's role badge and gated controls change within about a second without a reload, and the change is written to the audit log where admins can see who changed whom and when | We have no self-hosted email infra and the spec requires none. Revisit when M3 adds any notification transport. **Confirm before build** |
+| **Session expiry policy** | **Idle timeout 8 h + hard cap 7 days + 1 h access token.** `session.inactiveDurationMs = 8 h`, `session.totalDurationMs = 7 d`, `jwt.durationMs` left at the 1 h default. Auth cookie is a **session cookie** (`cookieConfig.maxAge = null`) | 8 h ≈ one shift, so a walked-away-from floor terminal locks itself by the next shift; 7 d forces periodic re-auth. Library defaults are 30 d / 30 d — too long for a dashboard intended to be exposed beyond the local network. Page reload still works (R10), closing the browser signs out. **Confirmed as built**: `backend/auth.ts`'s `session` config and `frontend/proxy.ts`'s `cookieConfig.maxAge: null` match this exactly |
+| **Role-change notification** | **No notification channel in v1.** The effect is immediate and visible instead: `users.me` is a live Convex query, so the acting user's role badge and gated controls change within about a second without a reload, and the change is written to the audit log where admins can see who changed whom and when | We have no self-hosted email infra and the spec requires none. Revisit when M3 adds any notification transport. **Confirmed as built**: `backend/users.ts`'s `me` is a plain `query` (live-subscribed) returning `capabilities`; no notification transport exists anywhere in the codebase |
 | Role model | **Ranked hierarchy** viewer(0) < operator(1) < maintenance(2) < admin(3), with a named **capability → minimum role** map | R5 inheritance becomes a single `rank >= rank` comparison; the capability map is the one table to audit and to test. Rejected: per-role allow-lists at each call site (today's shape — expresses no inheritance, drifts), per-capability ACL rows (overkill for system-wide roles) |
 | Attribution store (R11) | **Dedicated `auditLog` table** written by every state-changing admin operation | R11's new acceptance wants "who changed whom, and when" on a role change *today*, and alert-ack attribution later. A log generalizes; denormalized `roleUpdatedBy/At` columns would need a second mechanism per operation |
 
@@ -219,10 +219,11 @@ Indexes: `by_email`, `by_role`.
 
 | Field | Type | Notes |
 |---|---|---|
-| `actorId` | `v.id("users")` | Who performed it, from `getAuthUserId` — never from arguments |
-| `action` | string | `"user.create"`, `"user.setRole"`, `"user.deactivate"`, `"device.register"`, `"device.deactivate"`, later `"alert.acknowledge"` |
+| `actorId` | optional `v.id("users")` | Who performed it, from `getAuthUserId` — never from arguments. Absent only for a break-glass op run with the deployment admin key (`user.setPassword`), which carries `details.via` instead |
+| `action` | string | `"user.create"`, `"user.setRole"`, `"user.setActive"`, `"user.bootstrapAdmin"`, `"user.recoverAdmin"`, `"user.setPassword"`, `"device.register"`, `"device.update"`, `"device.decommission"`, `"device.reactivate"`, later `"alert.acknowledge"` |
 | `targetTable` / `targetId` | optional string | What it acted on |
-| `details` | optional `record(string, string)` | E.g. `{ from: "viewer", to: "operator" }` |
+| `details` | optional `record(string, string)` | Simple key/value context, e.g. `{ from: "viewer", to: "operator" }` |
+| `changes` | optional `array<{ field, before?, after? }>` | **Device-registry integration (post-merge).** A structured per-field before/after diff, for an edit that can touch several fields in one call (e.g. `devices.update` changing name/type/zone/metadata together) — built via `diffFields` in `lib/audit.ts`. Alongside `details` rather than replacing it, since most auth-side audit entries (role/active changes) only ever touch one field and `details` already covers those |
 | `at` | number | Epoch ms |
 
 Indexes: `by_at`, `by_actor_and_at`, `by_target` (`targetTable`, `targetId`, `at`).
@@ -268,6 +269,22 @@ and audit-atomicity parts of this section.
   `POST /ingest/telemetry` route (401 with no detail on a bad token).
 - `devices.ts`, `telemetry.ts` — re-declared through the wrappers; device writes also
   write `auditLog` rows.
+
+  **Post-merge note:** by the time this plan's functions were wired up, `device-registry`
+  had already landed on `main` with a richer `devices.ts` (paginated `list`/`facets`,
+  `changeHistory`, `decommission`/`reactivate` in place of a single `deactivate`) and its
+  own temporary auth seam (`backend/lib/access.ts`'s `requireAdmin`/`getActor`, gated by
+  a permissive `DEVICE_REGISTRY_REQUIRE_ADMIN` default). Merging the two: every device
+  read (`list`/`get`/`facets`) became `authedQuery({capability: "data.read", ...})`;
+  every write plus `changeHistory` became `authedMutation`/`authedQuery({capability:
+  "device.manage", ...})`; `requireCapability(ctx, "device.manage")` replaced the
+  `includeDecommissioned`-only extra admin check inside `list`/`facets`; and
+  `backend/lib/access.ts`, `DEVICE_REGISTRY_REQUIRE_ADMIN`, and
+  `backend/lib/config.ts`'s `deviceRegistryRequireAdmin()` were deleted outright — there
+  is no longer a second, device-registry-specific auth path. This closes
+  `specs/device-registry/spec.md`'s "Verification note — R16, R17, R31": those
+  requirements are now enforced by the real capability system, not a synthetic-admin
+  fallback.
 
 **Frontend**
 
