@@ -33,7 +33,7 @@ Full walkthrough, including Windows/PowerShell quoting and Docker, is in
 | Audit trail | `backend/audit.ts`, `auditLog` table | Who did what to whom, and when, for every state change. |
 | Route guard | `frontend/proxy.ts` | Redirects signed-out visitors to `/signin`. Not an authorization layer. |
 | Admin UI | `frontend/app/admin/users/page.tsx` | Create users, change roles, deactivate accounts, view recent changes. |
-| Ingestion credential | `backend/http.ts`, `backend/lib/serviceAuth.ts` | The gateway/simulator uses `INGEST_SERVICE_TOKEN`, not a user session. |
+| Ingestion credential | `backend/http.ts`, `backend/ingestHttp.ts`, `backend/lib/ingestAuth.ts` | The gateway/simulator authenticates to `POST /ingest/readings` with an `INGEST_TOKENS` service credential, not a user session. |
 
 ### Roles
 
@@ -94,18 +94,22 @@ npx convex env set INITIAL_ADMIN_EMAIL you@example.com
 
 ### 4. (Optional) set the ingestion token
 
-Only needed if you run the simulator or a gateway.
+Only needed if you run the simulator or a gateway. `INGEST_TOKENS` is a comma-separated
+list of `<sourceId>.<secret>` entries. The gateway sends one of them as its bearer token.
 
 ```sh
 # bash / Git Bash / WSL
-npx convex env set INGEST_SERVICE_TOKEN "$(openssl rand -hex 32)"
+npx convex env set INGEST_TOKENS "simulator.$(openssl rand -hex 24)"
 ```
 
 ```powershell
 # PowerShell (no openssl needed)
-$t = -join ((1..32) | ForEach-Object { '{0:x2}' -f (Get-Random -Max 256) })
-npx convex env set INGEST_SERVICE_TOKEN $t
+$token = "simulator." + (-join ((1..24) | ForEach-Object { '{0:x2}' -f (Get-Random -Max 256) }))
+npx convex env set INGEST_TOKENS $token
 ```
+
+To run the simulator against it, see
+[`gateway/simulator/README.md`](../../gateway/simulator/README.md).
 
 ### 5. Create the first admin
 
@@ -209,7 +213,7 @@ cosmetic only; the server re-checks.
 |---|---|
 | `JWT_PRIVATE_KEY`, `JWKS`, `SITE_URL` | Set by `npx @convex-dev/auth`. Token signing and the site URL. |
 | `INITIAL_ADMIN_EMAIL` | The one email allowed to bootstrap the first admin. |
-| `INGEST_SERVICE_TOKEN` | Bearer token the gateway/simulator sends to `POST /ingest/telemetry`. Unset means all ingestion is rejected. |
+| `INGEST_TOKENS` | Comma-separated `<sourceId>.<secret>` service credentials. The gateway/simulator sends one as its bearer token to `POST /ingest/readings`. Unset or empty means all ingestion is refused. |
 
 ## Troubleshooting
 
@@ -220,5 +224,5 @@ cosmetic only; the server re-checks.
 | `bootstrapAdmin` JSON parse error (PowerShell) | Use the escaped-quote form in step 5. |
 | Sign-in fails or loops back to `/signin` | Most often the auth keys were never set on this deployment. Re-run step 2 and check `npx convex env list` shows `JWT_PRIVATE_KEY`, `JWKS` and `SITE_URL`. |
 | "Sign-up is disabled" | Expected. Ask an admin to create your account. |
-| Telemetry from the simulator is dropped | Wrong URL (must be the **site** URL, port 3211 / `.convex.site`, not the API URL), token mismatch, or the device is not registered yet (admins register devices in the UI). |
+| Telemetry from the simulator is dropped | Wrong URL (must be the **site** URL ending in `/ingest/readings`: port 3211 for Docker, `CONVEX_SITE_URL` from `.env.local` for local `convex dev`, or `.convex.site` on Cloud, not the API URL), a token that isn't in `INGEST_TOKENS`, or the device is not registered yet (admins register devices in the UI). See [`gateway/simulator/README.md`](../../gateway/simulator/README.md). |
 | Signed-in user suddenly sees nothing | Their account was deactivated, or the session hit the 8 h idle / 7 day cap. |
