@@ -1,0 +1,7 @@
+[build]
+  base = ""
+  command = "npm run build --workspace=frontend"
+  publish = "frontend/.next"
+
+[build.environment]
+  NODE_VERSION = "20"
