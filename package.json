@@ -23,6 +23,6 @@
     "concurrently": "^8.2.2",
     "convex-test": "^0.0.59",
     "typescript": "^5.5.0",
-    "vitest": "^3.2.7"
+    "vitest": "^5.0.1"
   }
 }

@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { internalMutation } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { loadIngestConfig } from "./lib/ingestConfig";
+import { normalizeExternalIdKey } from "./lib/validation";
 import {
   validateReadingShape,
   computeFreshnessPatches,
@@ -49,6 +50,16 @@ interface RejectedSummaryEntry {
   metric?: string;
 }
 
+/** Running per-device, per-batch aggregate of readings rejected because the
+ * device is decommissioned (device-registry R26): patched onto the device
+ * once, after the loop — never once per reading — mirroring the freshness
+ * patch's once-per-batch shape below. */
+interface DecommissionedRejectionAggregate {
+  count: number;
+  lastAt: number;
+  externalId: string;
+}
+
 export const recordBatch = internalMutation({
   args: {
     sourceId: v.string(),
@@ -59,14 +70,16 @@ export const recordBatch = internalMutation({
     const now = Date.now();
     const config = loadIngestConfig();
 
-    // Per-externalId device cache, including negative results (unknown
-    // devices), so a batch with many readings for the same device only
-    // queries `devices` once per distinct externalId (R11 note: never
-    // creates a device row on a miss).
+    // Per-externalIdKey device cache (R20: normalized — trimmed, lowercased
+    // — so "SIM-CNC-01" matches a device registered as "sim-cnc-01"),
+    // including negative results (unknown devices), so a batch with many
+    // readings for the same device only queries `devices` once per distinct
+    // key (R11 note: never creates a device row on a miss).
     const deviceCache = new Map<string, Doc<"devices"> | null>();
 
     const rejectedSummary: RejectedSummaryEntry[] = [];
     const acceptedForFreshness: Array<{ deviceId: Id<"devices">; ts: number }> = [];
+    const decommissionedRejections = new Map<Id<"devices">, DecommissionedRejectionAggregate>();
     let stored = 0;
 
     async function reject(index: number, raw: unknown, reason: RejectionReason) {
@@ -100,23 +113,40 @@ export const recordBatch = internalMutation({
       }
       const reading = raw as { externalId: string; ts: number; metric: string; value: number | string };
 
-      // 2. Device existence / active (R11, R12) — the one part of
+      // 2. Device existence / lifecycle (R11, R12) — the one part of
       // validation that needs ctx.db, so it happens after shape validation.
-      let device = deviceCache.get(reading.externalId);
+      const key = normalizeExternalIdKey(reading.externalId);
+      let device = deviceCache.get(key);
       if (device === undefined) {
         device =
           (await ctx.db
             .query("devices")
-            .withIndex("by_externalId", (q) => q.eq("externalId", reading.externalId))
+            .withIndex("by_externalIdKey", (q) => q.eq("externalIdKey", key))
             .unique()) ?? null;
-        deviceCache.set(reading.externalId, device);
+        deviceCache.set(key, device);
       }
       if (!device) {
         await reject(index, raw, "unknown_device");
         continue;
       }
-      if (!device.isActive) {
+      if (device.lifecycle === "decommissioned") {
+        // R13 still applies: this reading gets its own rejection row and its
+        // own entry in the response's rejected[] (via `reject` above), same
+        // as any other rejection reason. In addition (device-registry R26),
+        // aggregate into a running per-device count/last-timestamp — never
+        // resurrecting the device's lifecycle/status/lastSeenAt (it never
+        // reaches `acceptedForFreshness` below), but making the refusal
+        // observable via `rejectedReadingCount`/`lastRejectedReadingAt`,
+        // patched once per device after the loop, not once per reading.
         await reject(index, raw, "inactive_device");
+        const running = decommissionedRejections.get(device._id) ?? {
+          count: 0,
+          lastAt: reading.ts,
+          externalId: device.externalId,
+        };
+        running.count += 1;
+        running.lastAt = Math.max(running.lastAt, reading.ts);
+        decommissionedRejections.set(device._id, running);
         continue;
       }
 
@@ -139,18 +169,39 @@ export const recordBatch = internalMutation({
       );
     }
 
+    // Devices seen this batch, by _id — used below for both the freshness
+    // patch (accepted readings only) and the decommissioned-rejection patch
+    // (decommissioned readings only); a device can only ever appear in one
+    // of the two, since a decommissioned device's readings never reach
+    // `acceptedForFreshness`.
+    const devicesById = new Map<Id<"devices">, Doc<"devices">>();
+    for (const device of deviceCache.values()) {
+      if (device) devicesById.set(device._id, device);
+    }
+
     // Freshness: at most one patch per device, only from accepted readings,
     // and only when it actually advances lastSeenAt (R19, R20).
-    const lastSeenAtByDeviceId = new Map<Id<"devices">, number | undefined>();
-    for (const device of deviceCache.values()) {
-      if (device) lastSeenAtByDeviceId.set(device._id, device.lastSeenAt);
-    }
     const patches = computeFreshnessPatches(
       acceptedForFreshness,
-      (deviceId) => lastSeenAtByDeviceId.get(deviceId),
+      (deviceId) => devicesById.get(deviceId)?.lastSeenAt,
     );
     for (const [deviceId, lastSeenAt] of patches) {
       await ctx.db.patch(deviceId, { status: "online", lastSeenAt });
+    }
+
+    // Decommissioned-rejection aggregate: at most one patch and one
+    // console.warn per device, regardless of how many of its readings were
+    // rejected in this batch (device-registry R26).
+    for (const [deviceId, { count, lastAt, externalId }] of decommissionedRejections) {
+      const device = devicesById.get(deviceId);
+      await ctx.db.patch(deviceId, {
+        rejectedReadingCount: (device?.rejectedReadingCount ?? 0) + count,
+        lastRejectedReadingAt: lastAt,
+      });
+      console.warn(
+        `ingest.recordBatch: rejected ${count} reading(s) for decommissioned device ` +
+          `${externalId} (${deviceId})`,
+      );
     }
 
     return {

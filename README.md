@@ -9,13 +9,14 @@ Realtime dashboard for monitoring industrial robots/machines, built on [Convex](
 | Feature | State |
 |---|---|
 | Schema, live device/telemetry view, telemetry simulator | ✅ Working |
+| Device registry — connectivity state, filtering/grouping, admin management UI, audit trail | ✅ Working ([details](specs/device-registry/)) |
 | Auth & roles — invite-only accounts, server-side RBAC, audit log | ✅ Working ([details](#authentication)) |
 | Hardened telemetry ingestion — authenticated, validated, rate-limited, observable | ✅ Working ([details](#ingestion)) |
 | Alerting, historical playback, production deployment profile | ⬜ Not started |
 
 See the [foundation plan](specs/foundation/plan.md) for what each milestone covers, and
-[`specs/auth-roles/`](specs/auth-roles/) / [`specs/telemetry-ingestion/`](specs/telemetry-ingestion/)
-for each feature's spec, plan and review.
+[`specs/auth-roles/`](specs/auth-roles/) / [`specs/telemetry-ingestion/`](specs/telemetry-ingestion/) /
+[`specs/device-registry/`](specs/device-registry/) for each feature's spec, plan and review.
 
 ## Architecture
 
@@ -47,6 +48,7 @@ flowchart LR
 | `backend/` | Convex schema (`schema.ts`) + functions. Convex CLI commands run from the **repo root**, which finds this folder via `convex.json`. |
 | `frontend/` | Next.js dashboard app. Imports generated types from `../backend/_generated/`. |
 | `gateway/simulator/` | Standalone telemetry simulator — stands in for a real device-protocol adapter until one is built. |
+| `tests/` | Backend function tests (`convex-test` + Vitest). Kept outside `backend/` so test-only tooling never risks being bundled into a deployment. Run with `npm test`. |
 | `specs/` | SDD artifacts, one folder per feature (`spec.md` → `plan.md` → `tasks.md` → `review.md`). See [`specs/README.md`](specs/README.md). Foundation docs live in [`specs/foundation/`](specs/foundation/). |
 | `.claude/agents/` | The four SDD agents (spec-writer, planner, builder, reviewer) that drive the workflow. |
 
@@ -165,6 +167,12 @@ npm run dev
 > see [Ingestion](#ingestion).)
 
 That's it for day-to-day development. Use **Docker deployment** below only when you need to test the self-hosted path itself.
+
+**Run the backend test suite** (Convex functions, via [`convex-test`](https://www.npmjs.com/package/convex-test) + [Vitest](https://vitest.dev), no running deployment needed):
+
+```sh
+npm test
+```
 
 <details>
 <summary><strong>Running backend/frontend separately instead of <code>npm run dev</code></strong></summary>
@@ -582,6 +590,53 @@ Run `npm test` (Vitest + `convex-test`). It covers:
 | `WAVELINK_INGEST_URL` | simulator | The ingestion endpoint URL (compose default: `http://backend:3211/ingest/readings`). |
 | `WAVELINK_MAX_BATCH` | simulator | Readings per ingestion request the simulator sends (default `50`); must not exceed `INGEST_MAX_READINGS_PER_BATCH`. |
 | *(14 more `INGEST_*` tunables)* | backend | See [Ingestion → Tunable limits](#tunable-limits) above. |
+
+### Device registry function env vars
+
+These are **not** consumed by `docker-compose.yml` or `.env` — Convex functions read `process.env`
+from the deployment's own env store, set with `npx convex env set <NAME> <VALUE>` (Quickstart) or the
+self-hosted dashboard's "Settings > Environment Variables" (Docker deployment). Changing one takes
+effect immediately, no redeploy required.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `DEVICE_HEARTBEAT_WINDOW_MS` | `60000` (60s) | Staleness threshold past which a device reads `offline`. Reasoned from the simulator's 2s cadence, not real field data — revisit once real telemetry cadence is known. |
+| `DEVICE_METADATA_MAX_ENTRIES` | `20` | Max metadata entries per device; exceeding it is a validation failure, not truncation. |
+| `DEVICE_METADATA_MAX_KEY_LENGTH` | `64` | Max metadata key length. |
+| `DEVICE_METADATA_MAX_VALUE_LENGTH` | `256` | Max metadata value length. |
+| `DEVICE_LIST_PAGE_SIZE` | `50` | Default page size for the paginated device list. |
+
+Device reads need the `data.read` capability (every role); register/update/decommission/
+reactivate/change-history need `device.manage` (admin only) — enforced the same way as every
+other protected function, via `authedQuery`/`authedMutation` (see [Authentication](#authentication)).
+The device registry no longer has an auth escape hatch of its own: the temporary
+`backend/lib/access.ts` seam it shipped with (before `auth-roles` merged) has been removed.
+
+The sweep interval (15s, bounding how quickly a stale device is marked `offline` — see
+`DEVICE_HEARTBEAT_WINDOW_MS` above) is a code constant in `backend/crons.ts`, not an env var:
+`crons.ts` is evaluated at Convex push time, so an env-driven interval would not take effect without a
+redeploy anyway.
+
+**Identifier normalization**: a device's external identifier is compared for uniqueness (and matched by
+incoming telemetry) after trimming whitespace and lowercasing — so a gateway sending `SIM-CNC-01`
+matches a device registered as `sim-cnc-01`, and registering `ROBOT-01` when `robot-01` already exists
+is refused. The as-entered (trimmed only) value is what's displayed and stored in `externalId`; the
+normalized form lives only in `externalIdKey`.
+
+### Migrating an existing deployment's `devices` table
+
+This feature replaced `devices.isActive: boolean` with `devices.lifecycle: "in_service" |
+"decommissioned"`. A fresh deployment (no existing `devices` rows) needs no extra step — `lifecycle` is
+simply required on every newly-inserted row. A deployment that already has `devices` rows from before
+this change must migrate in two steps, because Convex validates every existing row against the schema
+on push and a straight rename/add-required-field push will fail:
+
+1. Temporarily relax `backend/schema.ts` so `lifecycle` is `v.optional(...)` (keep `isActive` too), and
+   push.
+2. Run `npx convex run devices:backfillLifecycle` — a one-off `internalMutation` that sets `lifecycle`
+   from each row's legacy `isActive` (`false` → `decommissioned`, otherwise `in_service`).
+3. Re-tighten `lifecycle` to required and remove `isActive` from the schema (the state already
+   committed to this repo), and push again.
 
 ## Production (self-hosted, Postgres-backed)
 

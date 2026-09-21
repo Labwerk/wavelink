@@ -104,13 +104,13 @@ services:
         rm -f /repo/.env.local
         until [ -f /convex-data/admin_key.txt ]; do sleep 1; done
         export CONVEX_SELF_HOSTED_ADMIN_KEY=$(cat /convex-data/admin_key.txt)
-        # `$$` (not `$`) here: docker compose interpolates the whole file,
-        # including this multi-line command block, before the shell ever
-        # sees it — `$$VAR` is compose's escape for a literal `$VAR` that
-        # should be resolved by the container's shell (from the
-        # `environment:` list above) instead of by compose itself at
-        # file-parse time. Only set when provided, so a value set by hand on
-        # the deployment is never blanked.
+        # Double dollar signs below (not single) because docker compose
+        # interpolates the whole file, including this multi-line command
+        # block, before the shell ever sees it — doubling is compose's escape
+        # for a literal single dollar sign that should be resolved by the
+        # container's shell (from the `environment:` list above) instead of
+        # by compose itself at file-parse time. Only set when provided, so a
+        # value set by hand on the deployment is never blanked.
         if [ -n "$$INGEST_TOKENS" ]; then
           npx convex env set INGEST_TOKENS "$$INGEST_TOKENS"
         fi

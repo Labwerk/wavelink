@@ -512,3 +512,83 @@
     workspace packages under `frontend/` and `gateway/simulator/`, which each
     have their own `package.json` and are unaffected by the root's `type`
     field — so this is a no-risk cleanup, not a behavior change.
+
+- **Deviation:** Merged `main` a second time (the `device-registry` feature,
+  landed after the `auth-roles` merge above), requiring `backend/ingest.ts`
+  to adopt a schema change made underneath it.
+  - **Plan said:** Nothing — `device-registry` hadn't landed when this plan
+    (or the `auth-roles` merge deviation above) was written.
+  - **Did instead:** `device-registry` replaced `devices.isActive: boolean`
+    with `devices.lifecycle: "in_service" | "decommissioned"` (plus
+    `decommissionedAt`/`decommissionedBy`), replaced the `by_externalId`
+    index with a normalized `by_externalIdKey` (case/whitespace-insensitive
+    matching via `normalizeExternalIdKey()` in `backend/lib/validation.ts`,
+    their file — distinct from this feature's `backend/lib/ingestValidation.ts`),
+    and added `rejectedReadingCount`/`lastRejectedReadingAt` fields with a
+    requirement (their R26) that a decommissioned device's telemetry be
+    refused but *observable* — aggregated once per device per batch, never
+    once per reading. `backend/ingest.ts` kept this feature's full hardened
+    pipeline (auth, validation, rate limiting, rejection rows, partial
+    success — all unchanged) but: (1) device lookup now normalizes via
+    `normalizeExternalIdKey()` against `by_externalIdKey`, not raw
+    `externalId` against the now-gone `by_externalId`; (2) the R12
+    "inactive_device" rejection reason (the wire-visible reason code is
+    unchanged — only its trigger condition changed) now fires on
+    `device.lifecycle === "decommissioned"` instead of `!device.isActive`;
+    (3) a decommissioned-device rejection still gets its own per-reading
+    `ingestRejections` row and `rejected[]` entry exactly like any other
+    rejection reason (R13 unchanged), and *additionally* accumulates into a
+    per-device, per-batch aggregate (mirroring `computeFreshnessPatches`'s
+    shape) that is patched onto the device exactly once after the loop
+    (`rejectedReadingCount` incremented, `lastRejectedReadingAt` set to the
+    batch's max rejected timestamp for that device) with exactly one
+    `console.warn` per device per batch. A decommissioned device's
+    `lifecycle`/`status`/`lastSeenAt` are never touched by ingestion, by
+    construction: its readings are rejected before ever reaching
+    `acceptedForFreshness`, so the freshness-patch code path structurally
+    cannot see it. `backend/crons.ts` now registers both this feature's
+    hourly `ingestStats.prune` and device-registry's 15s
+    `devices.sweepOffline` in one `cronJobs()` object.
+  - **Why:** Same seam-collision situation as the `auth-roles` merge:
+    `device-registry` evolved the devices schema and (independently) a
+    minimal version of `recordBatch`'s decommissioned-device handling
+    against the *pre-hardened* `ingest.ts`; this feature's already-reviewed,
+    more complete pipeline was kept as the skeleton and their schema/behavior
+    change was integrated into it, rather than reverting to their simpler
+    mutation.
+  - **Consequence:** All 27 requirements remain met — re-verified: `npm
+    test` (`vitest run`) 234/234 passing across 14 files (up from 188/12
+    after the `auth-roles` merge — device-registry contributed
+    `tests/config.test.ts`, `tests/validation.test.ts`, and expanded
+    `tests/devices.test.ts`/`tests/accounts.test.ts`, plus a new
+    `describe("ingest.recordBatch device matching (R2, R20, R26)"` block in
+    `tests/ingest.test.ts` that genuinely exercises the decommissioned-device
+    aggregation behavior via `t.mutation(internal.ingest.recordBatch, ...)`
+    directly), `tsc --noEmit` clean across backend/simulator/frontend,
+    `docker compose config` valid. Two pre-existing test-fixture bugs
+    surfaced and were fixed, not worked around: (a) `tests/devices.test.ts`
+    had ten direct `internal.ingest.recordBatch` calls using the *old*
+    `{readings}`-only argument shape (from when it was written against
+    device-registry's pre-merge minimal mutation) — updated to pass
+    `sourceId`/`batchId`, now required; (b) two tests in
+    `tests/ingest.test.ts`'s new device-matching block used a hardcoded
+    historical timestamp (`ts: 1000`/`ts: 5000`) that this feature's R9
+    backfill-age window (default 7 days) correctly rejects as
+    `timestamp_too_old` — the pre-merge minimal mutation had no timestamp
+    validation at all, so this only surfaces now that the real validation
+    runs; fixed by using `Date.now()`, a realistic timestamp, since the
+    tests are about device-matching/lifecycle, not timestamp bounds (already
+    covered elsewhere). Neither fix weakened an assertion — both were
+    genuine test-fixture corrections needed to exercise the real, intended
+    behavior.
+  - **Pre-existing, out-of-scope issue noted, not fixed:** `npx tsc --noEmit
+    -p tests` reports a handful of type errors in `tests/devices.test.ts`
+    (device-registry's own file) unrelated to either merge —
+    `Id<"devices">` vs. plain `string` mismatches from a couple of helper
+    functions declaring `Promise<string>`/`(deviceId: string)` instead of
+    `Id<"devices">`, and a few `possibly 'undefined'` accesses on an
+    `Array.find()` result. These predate both merges (confirmed against
+    `origin/main`'s copy of the file directly), don't affect `vitest run`
+    (which transpiles, not typechecks), and are outside every file this
+    merge's instructions named — left for `device-registry`'s own follow-up
+    rather than fixed unilaterally here.
