@@ -1,7 +1,7 @@
 "use client";
 
 import { DeviceCard, type DeviceCardDevice } from "./DeviceCard";
-import styles from "./DeviceGrid.module.css";
+import { StatusBadge, type StatusKind } from "./StatusBadge";
 
 export type GroupBy = "none" | "zone" | "type" | "status";
 
@@ -20,7 +20,7 @@ export function DeviceGrid({
   groupBy: GroupBy;
 }) {
   if (devices.length === 0) {
-    return <p className={styles.empty}>No devices match the current filters.</p>;
+    return <p className="text-fg-muted">No devices match the current filters.</p>;
   }
 
   if (groupBy === "none") {
@@ -39,20 +39,22 @@ export function DeviceGrid({
   }
 
   return (
-    <>
+    <div className="space-y-6">
       {Array.from(groups.entries()).map(([key, groupDevices]) => (
-        <section key={key} className={styles.group}>
-          <h2 className={styles.groupHeading}>{key}</h2>
+        <section key={key}>
+          <h2 className="mb-2 text-base font-semibold text-fg">
+            {groupBy === "status" ? <StatusBadge kind={key as StatusKind} /> : key}
+          </h2>
           <Grid devices={groupDevices} now={now} />
         </section>
       ))}
-    </>
+    </div>
   );
 }
 
 function Grid({ devices, now }: { devices: readonly DeviceCardDevice[]; now: number }) {
   return (
-    <div className={styles.grid}>
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
       {devices.map((device) => (
         <DeviceCard key={device.deviceId} device={device} now={now} />
       ))}

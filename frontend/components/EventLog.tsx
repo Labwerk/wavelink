@@ -1,6 +1,6 @@
 "use client";
 
-import styles from "./EventLog.module.css";
+import { StatusBadge } from "./StatusBadge";
 
 export interface EventLogReading {
   id: string;
@@ -44,17 +44,17 @@ export function EventLog({
   }
 
   return (
-    <ul className={styles.log}>
+    <ul className="text-sm">
       {rows.map((row) =>
         row.kind === "gap" ? (
-          <li key={`gap-${row.fromTs}-${row.toTs}`} className={styles.gap}>
-            ⋯ gap of {formatDuration(row.toTs - row.fromTs)}
+          <li key={`gap-${row.fromTs}-${row.toTs}`} className="py-1">
+            <StatusBadge kind="warning" label={`Gap of ${formatDuration(row.toTs - row.fromTs)}`} />
           </li>
         ) : (
-          <li key={row.id} className={styles.entry}>
-            <span className={styles.time}>{new Date(row.ts).toLocaleTimeString()}</span>
-            <span className={styles.metric}>{row.metric}</span>
-            <span className={styles.value}>{row.value}</span>
+          <li key={row.id} className="flex gap-4 py-1 border-b border-border">
+            <span className="text-fg-muted">{new Date(row.ts).toLocaleTimeString()}</span>
+            <span>{row.metric}</span>
+            <span>{row.value}</span>
           </li>
         ),
       )}

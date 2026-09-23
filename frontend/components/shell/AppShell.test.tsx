@@ -129,15 +129,22 @@ describe("AppShell active section (R5)", () => {
   });
 });
 
-describe("AppShell sign out (R9)", () => {
+describe("AppShell sign out (R9, R16 account menu)", () => {
   it("signs out then replaces the route with /signin", async () => {
     signedInAs("viewer");
     renderShell();
-    await userEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    // Sign out lives inside the account menu (design-system R17 #2): open it first.
+    await userEvent.click(screen.getByRole("button", { name: /viewer@example\.com/i }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Sign out" }));
     expect(mocks.signOut).toHaveBeenCalledTimes(1);
     expect(mocks.replace).toHaveBeenCalledWith("/signin");
     expect(mocks.signOut.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.replace.mock.invocationCallOrder[0],
     );
   });
+
+  // Escape-to-close and focus-return are part of Headless UI's `Menu`
+  // keyboard handling (R16) but rely on real transition/animation-end
+  // events this jsdom environment cannot produce reliably; verified in the
+  // manual keyboard audit instead (see tasks.md).
 });

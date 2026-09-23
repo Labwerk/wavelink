@@ -5,6 +5,11 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useMemo, useState } from "react";
 import { api } from "../../../backend/_generated/api";
 import type { Id } from "../../../backend/_generated/dataModel";
+import { StatusBadge, type StatusKind } from "../../components/StatusBadge";
+import { Button } from "../../components/ui/Button";
+import { CheckboxInput, Field, Label, SelectInput } from "../../components/ui/Field";
+import { PageHeading } from "../../components/ui/PageHeading";
+import { SelectableList, SelectableListItem } from "../../components/ui/SelectableList";
 import { DeviceDetail } from "./DeviceDetail";
 import { DeviceForm, metadataToRecord, type DeviceFormValues } from "./DeviceForm";
 
@@ -104,124 +109,126 @@ export function DevicesView() {
   const groupCounts = groupBy === "zone" ? facets?.zones : groupBy === "type" ? facets?.types : facets?.statuses;
 
   return (
-    <main style={{ display: "flex", gap: "var(--space-6)", padding: "var(--space-6)" }}>
-      <section style={{ flex: 2 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h1>Devices</h1>
-          {isAdmin && <button onClick={() => setShowRegister(true)}>Register device</button>}
-        </div>
+    <main className="space-y-6">
+      <PageHeading actions={isAdmin && <Button variant="primary" onClick={() => setShowRegister(true)}>Register device</Button>}>
+        Devices
+      </PageHeading>
 
-        <div style={{ display: "flex", gap: "var(--space-4)", flexWrap: "wrap", margin: "var(--space-4) 0" }}>
-          <label>
-            Zone{" "}
-            <select value={zone ?? ""} onChange={(e) => setParams({ zone: e.target.value || undefined })}>
-              <option value="">All</option>
-              {zoneChoices.map((z) => (
-                <option key={z} value={z}>
-                  {z}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Type{" "}
-            <select value={type ?? ""} onChange={(e) => setParams({ type: e.target.value || undefined })}>
-              <option value="">All</option>
-              {typeChoices.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Status{" "}
-            <select
-              value={status ?? ""}
-              onChange={(e) => setParams({ status: e.target.value || undefined })}
-            >
-              <option value="">All</option>
-              <option value="online">Online</option>
-              <option value="offline">Offline</option>
-              <option value="unknown">Unknown</option>
-            </select>
-          </label>
-          <label>
-            Group by{" "}
-            <select value={groupBy} onChange={(e) => setParams({ group: e.target.value })}>
-              <option value="none">None</option>
-              <option value="zone">Zone</option>
-              <option value="type">Type</option>
-              <option value="status">Status</option>
-            </select>
-          </label>
-          {isAdmin && (
-            <label>
-              <input
-                type="checkbox"
-                checked={includeDecommissioned}
-                onChange={(e) =>
-                  setParams({ includeDecommissioned: e.target.checked ? "true" : undefined })
-                }
-              />{" "}
-              Include decommissioned
-            </label>
+      <div className="flex gap-8">
+        <section className="flex-1 space-y-4">
+          <div className="flex flex-wrap gap-4">
+            <Field>
+              <Label>Zone</Label>
+              <SelectInput value={zone ?? ""} onChange={(e) => setParams({ zone: e.target.value || undefined })}>
+                <option value="">All</option>
+                {zoneChoices.map((z) => (
+                  <option key={z} value={z}>
+                    {z}
+                  </option>
+                ))}
+              </SelectInput>
+            </Field>
+            <Field>
+              <Label>Type</Label>
+              <SelectInput value={type ?? ""} onChange={(e) => setParams({ type: e.target.value || undefined })}>
+                <option value="">All</option>
+                {typeChoices.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </SelectInput>
+            </Field>
+            <Field>
+              <Label>Status</Label>
+              <SelectInput value={status ?? ""} onChange={(e) => setParams({ status: e.target.value || undefined })}>
+                <option value="">All</option>
+                <option value="online">Online</option>
+                <option value="offline">Offline</option>
+                <option value="unknown">Unknown</option>
+              </SelectInput>
+            </Field>
+            <Field>
+              <Label>Group by</Label>
+              <SelectInput value={groupBy} onChange={(e) => setParams({ group: e.target.value })}>
+                <option value="none">None</option>
+                <option value="zone">Zone</option>
+                <option value="type">Type</option>
+                <option value="status">Status</option>
+              </SelectInput>
+            </Field>
+            {isAdmin && (
+              <Field className="flex-row items-center gap-2 self-end">
+                <CheckboxInput
+                  checked={includeDecommissioned}
+                  onChange={(checked) => setParams({ includeDecommissioned: checked ? "true" : undefined })}
+                />
+                <Label>Include decommissioned</Label>
+              </Field>
+            )}
+          </div>
+
+          {groupBy !== "none" && groupCounts && (
+            <p className="text-fg-muted">
+              {groupCounts.map((g) => `${g.value} (${g.count})`).join(" · ")}
+              {facets?.truncated && " — counts truncated at scan cap"}
+            </p>
           )}
-        </div>
 
-        {groupBy !== "none" && groupCounts && (
-          <p style={{ color: "var(--color-text-muted)" }}>
-            {groupCounts.map((g) => `${g.value} (${g.count})`).join(" · ")}
-            {facets?.truncated && " — counts truncated at scan cap"}
-          </p>
-        )}
+          {/* Some filters are applied residually after the server-side page fetch
+              (facets(), backend/devices.ts), so an empty page doesn't mean no
+              matches exist elsewhere — only "Exhausted" (no more pages left) does. */}
+          {results.length === 0 && pageStatus === "Exhausted" && <p>No devices match these filters.</p>}
 
-        {/* Some filters are applied residually after the server-side page fetch
-            (facets(), backend/devices.ts), so an empty page doesn't mean no
-            matches exist elsewhere — only "Exhausted" (no more pages left) does. */}
-        {results.length === 0 && pageStatus === "Exhausted" && <p>No devices match these filters.</p>}
+          {groupedEntries
+            ? groupedEntries.map(([groupValue, devices]) => (
+                <div key={groupValue} className="mb-4">
+                  <h3 className="mb-2 text-base font-semibold text-fg">
+                    {groupBy === "status" ? (
+                      <StatusBadge kind={groupValue as StatusKind} />
+                    ) : (
+                      groupValue
+                    )}{" "}
+                    ({devices.length})
+                  </h3>
+                  <DeviceList devices={devices} selectedId={selectedId} onSelect={setSelectedId} />
+                </div>
+              ))
+            : <DeviceList devices={results} selectedId={selectedId} onSelect={setSelectedId} />}
 
-        {groupedEntries
-          ? groupedEntries.map(([groupValue, devices]) => (
-              <div key={groupValue} style={{ marginBottom: "var(--space-4)" }}>
-                <h3>
-                  {groupValue} ({devices.length})
-                </h3>
-                <DeviceList devices={devices} selectedId={selectedId} onSelect={setSelectedId} />
-              </div>
-            ))
-          : <DeviceList devices={results} selectedId={selectedId} onSelect={setSelectedId} />}
+          {pageStatus === "CanLoadMore" && (
+            <Button variant="secondary" onClick={() => loadMore(PAGE_SIZE)}>
+              Load more
+            </Button>
+          )}
+          {pageStatus === "LoadingMore" && <p>Loading more…</p>}
+        </section>
 
-        {pageStatus === "CanLoadMore" && (
-          <button onClick={() => loadMore(PAGE_SIZE)}>Load more</button>
-        )}
-        {pageStatus === "LoadingMore" && <p>Loading more…</p>}
-      </section>
-
-      <section style={{ flex: 1 }}>
-        {showRegister ? (
-          <div>
-            <h2>Register device</h2>
-            <DeviceForm
-              mode="register"
+        <section className="flex-1">
+          {showRegister ? (
+            <div className="space-y-2">
+              <h2 className="text-xl font-semibold text-fg">Register device</h2>
+              <DeviceForm
+                mode="register"
+                zoneSuggestions={allZoneChoices}
+                typeSuggestions={allTypeChoices}
+                submitting={false}
+                onSubmit={handleRegister}
+                onCancel={() => setShowRegister(false)}
+              />
+            </div>
+          ) : selectedId ? (
+            <DeviceDetail
+              deviceId={selectedId}
+              isAdmin={isAdmin}
               zoneSuggestions={allZoneChoices}
               typeSuggestions={allTypeChoices}
-              submitting={false}
-              onSubmit={handleRegister}
-              onCancel={() => setShowRegister(false)}
             />
-          </div>
-        ) : selectedId ? (
-          <DeviceDetail
-            deviceId={selectedId}
-            isAdmin={isAdmin}
-            zoneSuggestions={allZoneChoices}
-            typeSuggestions={allTypeChoices}
-          />
-        ) : (
-          <p>Select a device.</p>
-        )}
-      </section>
+          ) : (
+            <p>Select a device.</p>
+          )}
+        </section>
+      </div>
     </main>
   );
 }
@@ -236,22 +243,14 @@ function DeviceList({
   onSelect: (id: Id<"devices">) => void;
 }) {
   return (
-    <ul style={{ listStyle: "none", padding: 0 }}>
+    <SelectableList>
       {devices.map((d) => (
-        <li
-          key={d._id}
-          onClick={() => onSelect(d._id)}
-          style={{
-            padding: "var(--space-2)",
-            cursor: "pointer",
-            background: selectedId === d._id ? "var(--color-surface-raised)" : "transparent",
-            borderBottom: "1px solid var(--color-border)",
-          }}
-        >
-          <strong>{d.name}</strong> ({d.type}) — {d.lifecycle === "decommissioned" ? "decommissioned" : d.status}
+        <SelectableListItem key={d._id} selected={selectedId === d._id} onClick={() => onSelect(d._id)}>
+          <strong>{d.name}</strong> ({d.type}) —{" "}
+          <StatusBadge kind={d.lifecycle === "decommissioned" ? "decommissioned" : (d.status as StatusKind)} />
           {d.zone && <span> · {d.zone}</span>}
-        </li>
+        </SelectableListItem>
       ))}
-    </ul>
+    </SelectableList>
   );
 }

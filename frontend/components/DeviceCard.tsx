@@ -1,8 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { classifyFreshness } from "../lib/freshness";
-import styles from "./DeviceCard.module.css";
+import { StatusBadge } from "./StatusBadge";
+import { Card } from "./ui/Card";
 
 export interface DeviceCardMetric {
   metric: string;
@@ -23,10 +23,11 @@ export interface DeviceCardDevice {
 }
 
 /**
- * One device's tile on the overview screen (R1, R2). Status and last-seen
- * are rendered verbatim from `device` (R1); staleness (R6) is a *separate*
- * affordance layered on top — a text badge plus muted metric values, never
- * colour alone, so it's still testable/visible without relying on colour.
+ * One device's tile on the overview screen (R1, R2, R17 #4 card). Status
+ * and last-seen are rendered verbatim from `device` (R1); staleness (R6) is
+ * a *separate* affordance layered on top — a status badge plus muted metric
+ * values, never colour alone, so it's still testable/visible without
+ * relying on colour.
  */
 export function DeviceCard({ device, now }: { device: DeviceCardDevice; now: number }) {
   const freshness = classifyFreshness({
@@ -37,37 +38,37 @@ export function DeviceCard({ device, now }: { device: DeviceCardDevice; now: num
   const isNotLive = freshness !== "live";
 
   return (
-    <Link
+    <Card
       href={`/devices/${device.deviceId}`}
-      className={styles.card}
+      interactive
+      tone={freshness === "stale" ? "warning" : undefined}
       data-freshness={freshness}
     >
-      <div className={styles.header}>
-        <span className={styles.name}>{device.name}</span>
-        {isNotLive && (
-          <span className={styles.staleBadge}>
-            ⚠ {freshness === "never" ? "Never reported" : `Stale · ${formatAge(now, device.lastSeenAt)}`}
-          </span>
-        )}
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="font-semibold text-fg">{device.name}</span>
+        {isNotLive &&
+          (freshness === "never" ? (
+            <StatusBadge kind="unknown" label="Never reported" />
+          ) : (
+            <StatusBadge kind="stale" label={`Stale · ${formatAge(now, device.lastSeenAt)}`} />
+          ))}
       </div>
-      <p className={styles.meta}>
+      <p className="my-1 text-sm text-fg-muted">
         {device.type}
         {device.zone ? ` · ${device.zone}` : null}
       </p>
-      <p className={styles.status}>
-        Status: <strong>{device.status}</strong> · Last seen: {formatLastSeen(device.lastSeenAt)}
+      <p className="my-1 text-sm text-fg-muted">
+        Status: <StatusBadge kind={device.status} /> · Last seen: {formatLastSeen(device.lastSeenAt)}
       </p>
-      <ul className={isNotLive ? `${styles.metrics} ${styles.metricsMuted}` : styles.metrics}>
+      <ul className={`mt-2 flex flex-wrap gap-x-4 gap-y-2 ${isNotLive ? "opacity-60" : ""}`}>
         {device.keyMetrics.map((metric) => (
-          <li key={metric.metric} className={styles.metric}>
-            <span className={styles.metricName}>{metric.metric}</span>
-            <span className={styles.metricValue}>
-              {metric.value === null ? "—" : metric.value}
-            </span>
+          <li key={metric.metric} className="flex flex-col text-sm">
+            <span className="text-fg-muted">{metric.metric}</span>
+            <span className="font-semibold text-fg">{metric.value === null ? "—" : metric.value}</span>
           </li>
         ))}
       </ul>
-    </Link>
+    </Card>
   );
 }
 

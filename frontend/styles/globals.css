@@ -1,55 +1,64 @@
-/* Base element rules. Values come from tokens.css only (design-system R1, R6). */
-:root {
-  color-scheme: dark;
-}
+@import "tailwindcss";
+@import "./tokens.css";
 
-body {
-  margin: 0;
-  background: var(--color-bg);
-  color: var(--color-text);
-  font-family: var(--font-sans);
-  line-height: var(--leading-normal);
-}
+/*
+ * Minimal documented base layer (design-system R15 allows this). Nothing
+ * else lives here: no control styling (Field/Button own that) and no
+ * margins. Listed in styles/README.md.
+ * 1. :root color-scheme (R6) — native controls/scrollbars render dark.
+ * 2. body: canvas/fg/font/leading, via theme variables.
+ * 3. Focus ring convention (R17 #9): a transparent resting outline so
+ *    :focus-visible can animate the color in (default transition) instead
+ *    of snapping; recipes that need an inset ring use `-outline-offset-2`.
+ * 4. Plain inline links with no recipe (e.g. "Back to dashboard"): accent
+ *    color, hover accent-hover, active fg. Wrapped in :where() (zero
+ *    specificity) so a recipe's own classes always win.
+ * 5. h2/h3 sizes/weights (Preflight unstyles headings). h1 is styled only
+ *    by PageHeading (R17 #3).
+ */
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
 
-a {
-  color: var(--color-accent);
-}
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    line-height: var(--leading-normal);
+  }
 
-:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
+  :where(a, button, input, select, textarea, summary, [tabindex]) {
+    outline: 2px solid transparent;
+    outline-offset: 2px;
+  }
 
-/* Keep unstyled native controls in existing screens legible on the dark theme. */
-input,
-select,
-textarea,
-button {
-  background: var(--color-surface-raised);
-  color: var(--color-text);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  font: inherit;
-}
+  :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+    outline-color: var(--color-accent);
+  }
 
-button:disabled {
-  color: var(--color-text-muted);
-}
+  :where(a) {
+    color: var(--color-accent);
+    transition: color var(--default-transition-duration) var(--default-transition-timing-function);
+  }
 
-h1,
-h2,
-h3 {
-  line-height: var(--leading-tight);
-}
+  :where(a):hover {
+    color: var(--color-accent-hover);
+  }
 
-h1 {
-  font-size: var(--text-xl);
-}
+  :where(a):active {
+    color: var(--color-fg);
+  }
 
-h2 {
-  font-size: var(--text-lg);
-}
+  h2 {
+    font-size: var(--text-xl);
+    font-weight: var(--font-weight-semibold);
+    line-height: var(--leading-tight);
+  }
 
-h3 {
-  font-size: var(--text-md);
+  h3 {
+    font-size: var(--text-base);
+    font-weight: var(--font-weight-semibold);
+    line-height: var(--leading-tight);
+  }
 }

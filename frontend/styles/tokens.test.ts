@@ -46,24 +46,27 @@ function contrast(fg: Rgba, bg: Rgba): number {
   return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
 }
 
+// The whole file is one @theme block (design-system R15) — every token
+// lives there, so parsing the whole file is equivalent to parsing @theme.
 const tokens = parseTokens(CSS);
 const color = (name: string) => parseColor(tokens[name]);
 
 const MIN_TEXT_CONTRAST = 4.5;
 
 const TEXT_TOKENS = [
-  "--color-text",
-  "--color-text-muted",
+  "--color-fg",
+  "--color-fg-muted",
   "--color-accent",
+  "--color-accent-hover",
   "--color-success",
   "--color-warning",
   "--color-danger",
   "--color-neutral",
   "--color-decommissioned",
 ];
-const BACKGROUND_TOKENS = ["--color-bg", "--color-surface", "--color-surface-raised"];
+const BACKGROUND_TOKENS = ["--color-canvas", "--color-surface", "--color-surface-raised", "--color-surface-hover"];
 
-describe("tokens.css contrast (R2, R6)", () => {
+describe("tokens.css contrast (R2, R6, R11)", () => {
   for (const fg of TEXT_TOKENS) {
     for (const bg of BACKGROUND_TOKENS) {
       it(`${fg} on ${bg} is at least ${MIN_TEXT_CONTRAST}:1`, () => {
@@ -84,9 +87,10 @@ describe("tokens.css contrast (R2, R6)", () => {
     ["--color-danger", "--color-danger-bg"],
     ["--color-neutral", "--color-neutral-bg"],
     ["--color-decommissioned", "--color-neutral-bg"],
+    ["--color-accent", "--color-accent-bg"],
   ];
   for (const [fg, tint] of TINTS) {
-    for (const base of ["--color-surface", "--color-bg"]) {
+    for (const base of ["--color-surface", "--color-canvas"]) {
       it(`${fg} on ${tint} over ${base} is at least ${MIN_TEXT_CONTRAST}:1`, () => {
         const background = blend(color(tint), color(base));
         expect(contrast(color(fg), background)).toBeGreaterThanOrEqual(MIN_TEXT_CONTRAST);
@@ -95,13 +99,57 @@ describe("tokens.css contrast (R2, R6)", () => {
   }
 });
 
-describe("tokens.css and README.md parity (R1)", () => {
+describe("tokens.css namespace resets (R7, R15)", () => {
+  it("resets every default Tailwind namespace this theme replaces", () => {
+    for (const ns of [
+      "--color-*",
+      "--text-*",
+      "--font-*",
+      "--font-weight-*",
+      "--leading-*",
+      "--radius-*",
+      "--shadow-*",
+      "--inset-shadow-*",
+      "--drop-shadow-*",
+      "--text-shadow-*",
+      "--ease-*",
+      "--animate-*",
+    ]) {
+      const pattern = new RegExp(`${ns.replace("*", "\\*")}\\s*:\\s*initial\\s*;`);
+      expect(pattern.test(CSS), `expected ${ns}: initial; in tokens.css`).toBe(true);
+    }
+  });
+});
+
+describe("tokens.css elevation (R10)", () => {
+  it("defines --shadow-1 and --shadow-2", () => {
+    expect(tokens["--shadow-1"]).toBeDefined();
+    expect(tokens["--shadow-2"]).toBeDefined();
+  });
+
+  it("README documents a z-index scale (10/20/30) alongside the shadow levels", () => {
+    expect(README).toMatch(/z-10/);
+    expect(README).toMatch(/z-20/);
+    expect(README).toMatch(/z-30/);
+  });
+});
+
+describe("tokens.css motion (R11)", () => {
+  it("sets the shared duration and easing as Tailwind's default transition variables", () => {
+    expect(tokens["--default-transition-duration"]).toBeDefined();
+    expect(tokens["--default-transition-timing-function"]).toBeDefined();
+  });
+});
+
+describe("tokens.css and README.md parity (R1, R15)", () => {
   const documented = new Set(
     Array.from(README.matchAll(/^\|\s*`(--[a-z0-9-]+)`\s*\|/gm), (m) => m[1]),
   );
 
-  it("documents every token defined in tokens.css", () => {
-    const missing = Object.keys(tokens).filter((name) => !documented.has(name));
+  it("documents every token defined in tokens.css (excluding namespace resets)", () => {
+    const missing = Object.keys(tokens).filter(
+      (name) => tokens[name] !== "initial" && !documented.has(name),
+    );
     expect(missing).toEqual([]);
   });
 
@@ -111,7 +159,7 @@ describe("tokens.css and README.md parity (R1)", () => {
   });
 
   it("defines the required token groups", () => {
-    for (const prefix of ["--color-", "--space-", "--text-", "--font-", "--radius-", "--sidebar-", "--topbar-"]) {
+    for (const prefix of ["--color-", "--spacing", "--text-", "--font-", "--radius-", "--shadow-"]) {
       expect(Object.keys(tokens).some((name) => name.startsWith(prefix))).toBe(true);
     }
   });

@@ -1,7 +1,6 @@
 import { ConvexAuthNextjsServerProvider } from "@convex-dev/auth/nextjs/server";
 import { ReactNode } from "react";
 import { AppShell } from "../components/shell/AppShell";
-import "../styles/tokens.css";
 import "../styles/globals.css";
 import { Providers } from "./providers";
 

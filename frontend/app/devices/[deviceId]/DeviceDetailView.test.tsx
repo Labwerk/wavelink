@@ -85,9 +85,10 @@ describe("DeviceDetailView", () => {
       events: [],
     });
 
-    render(<DeviceDetailView deviceId={deviceId} />);
+    const { container } = render(<DeviceDetailView deviceId={deviceId} />);
 
     expect(screen.getByText("Retired Mill")).toBeInTheDocument();
     expect(screen.getByText("Decommissioned")).toBeInTheDocument();
+    expect(container.querySelector('[data-kind="decommissioned"]')).toBeInTheDocument();
   });
 });

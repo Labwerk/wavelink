@@ -7,6 +7,8 @@ import { api } from "../../backend/_generated/api";
 import { useNow } from "../lib/useNow";
 import { ALL, FilterBar, type FilterValue } from "../components/FilterBar";
 import { DeviceGrid, type GroupBy } from "../components/DeviceGrid";
+import { PageHeading } from "../components/ui/PageHeading";
+import { Field, Label, SelectInput } from "../components/ui/Field";
 
 const GROUP_BY_OPTIONS: readonly GroupBy[] = ["none", "zone", "type", "status"];
 
@@ -21,7 +23,7 @@ export default function LiveOverviewPage() {
   // useSearchParams requires a Suspense boundary above it so the rest of the
   // route can still be prerendered (see frontend/AGENTS.md — Next 16 docs).
   return (
-    <Suspense fallback={<main style={{ padding: "var(--space-6)" }}>Loading…</main>}>
+    <Suspense fallback={<main>Loading…</main>}>
       <Overview />
     </Suspense>
   );
@@ -71,8 +73,8 @@ function Overview() {
   });
 
   return (
-    <main style={{ padding: "var(--space-6)" }}>
-      <h1>Devices</h1>
+    <main className="space-y-4">
+      <PageHeading>Devices</PageHeading>
       {devices === undefined && <p>Loading…</p>}
       {devices?.length === 0 && <p>No active devices yet. Start the simulator to seed data.</p>}
       {devices !== undefined && devices.length > 0 && (
@@ -84,21 +86,19 @@ function Overview() {
             value={filterValue}
             onChange={(next) => updateParams(next)}
           />
-          <div style={{ marginBottom: "var(--space-4)", fontSize: "var(--text-sm)" }}>
-            <label>
-              Group by:{" "}
-              <select
-                aria-label="Group by"
-                value={groupBy}
-                onChange={(event) => updateParams({ groupBy: event.target.value as GroupBy })}
-              >
-                <option value="none">None</option>
-                <option value="zone">Zone</option>
-                <option value="type">Type</option>
-                <option value="status">Status</option>
-              </select>
-            </label>
-          </div>
+          <Field className="max-w-xs">
+            <Label>Group by</Label>
+            <SelectInput
+              aria-label="Group by"
+              value={groupBy}
+              onChange={(event) => updateParams({ groupBy: event.target.value as GroupBy })}
+            >
+              <option value="none">None</option>
+              <option value="zone">Zone</option>
+              <option value="type">Type</option>
+              <option value="status">Status</option>
+            </SelectInput>
+          </Field>
           <DeviceGrid devices={filtered} now={now} groupBy={groupBy} />
         </>
       )}

@@ -16,7 +16,17 @@ const TICK_MS = 1000;
 const listeners = new Set<() => void>();
 let intervalId: ReturnType<typeof setInterval> | null = null;
 
+// Cached lazily (not at module load) so a component's first render — before
+// any tick has fired — still reflects the actual current time, not whatever
+// Date.now() happened to be when this module loaded. Cached (not recomputed
+// on every call) between ticks because useSyncExternalStore requires
+// getSnapshot to return a stable value when the store hasn't changed;
+// returning a fresh Date.now() on every call breaks that contract and can
+// make React think the store is tearing, forcing a render loop.
+let cachedNow: number | null = null;
+
 function tick() {
+  cachedNow = Date.now();
   for (const listener of listeners) listener();
 }
 
@@ -34,11 +44,9 @@ function subscribe(listener: () => void): () => void {
   };
 }
 
-// Always computed live (never cached between ticks) so a component's first
-// render — before any tick has fired — still reflects the actual current
-// time, not whatever Date.now() happened to be when this module loaded.
 function getSnapshot() {
-  return Date.now();
+  if (cachedNow === null) cachedNow = Date.now();
+  return cachedNow;
 }
 
 /** The current time (ms epoch), re-rendering every subscriber once a second. */

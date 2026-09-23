@@ -6,7 +6,7 @@ import { DevicesView } from "./DevicesView";
 // confirmed against node_modules/next/dist/docs/01-app/.../use-search-params.md).
 export default function DevicesPage() {
   return (
-    <Suspense fallback={<p style={{ padding: "var(--space-6)" }}>Loading…</p>}>
+    <Suspense fallback={<p>Loading…</p>}>
       <DevicesView />
     </Suspense>
   );

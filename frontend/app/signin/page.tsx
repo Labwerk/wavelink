@@ -3,10 +3,14 @@
 import { useAuthActions } from "@convex-dev/auth/react";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
+import { Button } from "../../components/ui/Button";
+import { ErrorText, Field, FieldGroup, Label, TextInput } from "../../components/ui/Field";
 
 // Sign-in only (spec R10). There is no public sign-up: accounts are created by
 // an administrator (or the one-time first-admin bootstrap, see README).
 // Server-side checks on every query/mutation remain the real enforcement.
+// Outside the shell (unauthenticated, design-system R14): conventions 7, 8
+// and 9 (form field, button, focus ring) still apply.
 export default function SignInPage() {
   const { signIn } = useAuthActions();
   const router = useRouter();
@@ -30,45 +34,26 @@ export default function SignInPage() {
   }
 
   return (
-    <main
-      style={{
-        maxWidth: 360,
-        margin: "4rem auto",
-        padding: "var(--space-6)",
-      }}
-    >
-      <h1>Wavelink</h1>
+    <main className="max-w-sm mx-auto mt-12 p-content">
+      <h1 className="text-2xl font-semibold leading-tight text-fg">Wavelink</h1>
       <p>Sign in to view the dashboard.</p>
-      <form
-        onSubmit={handleSubmit}
-        style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}
-      >
-        <label>
-          Email
-          <input
-            name="email"
-            type="email"
-            required
-            autoComplete="email"
-            style={{ display: "block", width: "100%" }}
-          />
-        </label>
-        <label>
-          Password
-          <input
-            name="password"
-            type="password"
-            required
-            autoComplete="current-password"
-            style={{ display: "block", width: "100%" }}
-          />
-        </label>
-        {error && <p style={{ color: "var(--color-danger)" }}>{error}</p>}
-        <button type="submit" disabled={submitting}>
-          Sign in
-        </button>
+      <form onSubmit={handleSubmit} className="mt-4">
+        <FieldGroup>
+          <Field>
+            <Label>Email</Label>
+            <TextInput name="email" type="email" required autoComplete="email" />
+          </Field>
+          <Field>
+            <Label>Password</Label>
+            <TextInput name="password" type="password" required autoComplete="current-password" />
+          </Field>
+          {error && <ErrorText>{error}</ErrorText>}
+          <Button type="submit" variant="primary" disabled={submitting}>
+            Sign in
+          </Button>
+        </FieldGroup>
       </form>
-      <p style={{ marginTop: "var(--space-5)", fontSize: "var(--text-sm)", color: "var(--color-text-muted)" }}>
+      <p className="mt-6 text-sm text-fg-muted">
         Accounts are created by an administrator. Ask yours if you need access.
       </p>
     </main>

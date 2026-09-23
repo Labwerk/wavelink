@@ -1,23 +1,44 @@
 /*
- * Design tokens: the ONLY place visual values are defined (design-system R1).
- * Everything else (CSS Modules, inline styles, globals.css) references these
- * with var(--token). Documented in styles/README.md; a test keeps the two in
- * sync. Dark theme only for v1.
+ * Design tokens: the ONLY place visual values are defined (design-system R1,
+ * R15). A Tailwind v4 `@theme` block — theme keys become both Tailwind
+ * utilities (e.g. `--color-accent` -> `bg-accent`/`text-accent`) and plain
+ * CSS custom properties (`var(--color-accent)`). Documented in
+ * styles/README.md; tokens.test.ts keeps the two in sync. Dark theme only.
+ *
+ * The default namespaces we replace are reset to `initial` first, so only
+ * our tokens generate utilities (no accidental `bg-gray-800`/`shadow-lg`
+ * from Tailwind's built-in palette) — this is R7/R15 enforced by the build.
  */
-:root {
+@theme {
+  --color-*: initial;
+  --text-*: initial;
+  --font-*: initial;
+  --font-weight-*: initial;
+  --leading-*: initial;
+  --radius-*: initial;
+  --shadow-*: initial;
+  --inset-shadow-*: initial;
+  --drop-shadow-*: initial;
+  --text-shadow-*: initial;
+  --ease-*: initial;
+  --animate-*: initial;
+
   /* Colors: surfaces and text */
-  --color-bg: #0b1020;
+  --color-canvas: #0b1020;
   --color-surface: #131a2e;
   --color-surface-raised: #1b2440;
+  --color-surface-hover: #253052;
   --color-border: #2a3556;
-  --color-text: #e6eaf5;
-  --color-text-muted: #9aa6c4;
+  --color-fg: #e6eaf5;
+  --color-fg-muted: #9aa6c4;
 
   /* Colors: accent */
   --color-accent: #5b9dff;
+  --color-accent-hover: #86b6ff;
+  --color-accent-bg: rgba(91, 157, 255, 0.14);
   --color-on-accent: #0b1020;
 
-  /* Colors: status (always paired with a glyph and a text label) */
+  /* Colors: status (always paired with an icon and a text label — StatusBadge only) */
   --color-success: #3dd68c;
   --color-warning: #f5b942;
   --color-danger: #ff6b6b;
@@ -28,35 +49,50 @@
   --color-danger-bg: rgba(255, 107, 107, 0.14);
   --color-neutral-bg: rgba(154, 166, 196, 0.14);
 
-  /* Spacing (4px base) */
-  --space-1: 0.25rem;
-  --space-2: 0.5rem;
-  --space-3: 0.75rem;
-  --space-4: 1rem;
-  --space-5: 1.5rem;
-  --space-6: 2rem;
-  --space-7: 3rem;
+  /* Spacing: keep Tailwind's documented multiplier (p-4 = 1rem); only the
+     allowed steps below are used (enforced by the static test), plus named
+     layout keys for the shell (R14). */
+  --spacing: 0.25rem;
+  --spacing-sidebar: 14.5rem;
+  --spacing-topbar: 3.5rem;
+  --spacing-content: 2rem;
+  --spacing-icon: 0.875rem;
 
   /* Typography */
   --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
   --text-xs: 0.75rem;
-  --text-sm: 0.85rem;
-  --text-md: 1rem;
-  --text-lg: 1.25rem;
-  --text-xl: 1.5rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
   --leading-tight: 1.25;
   --leading-normal: 1.5;
-  --weight-regular: 400;
-  --weight-semibold: 600;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
 
-  /* Radius */
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-pill: 999px;
+  /* Radius (Tailwind UI convention: cards rounded-lg, controls/buttons/badges rounded-md) */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
 
-  /* Layout */
-  --sidebar-width: 14.5rem;
-  --topbar-height: 3.5rem;
+  /* Elevation (design-system R10): each level pairs a shadow with the tonal
+     surface step it belongs on, so depth still reads if the border is
+     ignored. z-scale (10 topbar / 20 sidebar / 30 menu popover) is not a
+     theme value — it is the plain Tailwind z-* scale, documented in the
+     README and enforced by the static test. */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 6px 1px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --shadow-2: 0 2px 4px rgba(0, 0, 0, 0.5), 0 8px 16px 2px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+
+  /* Motion (design-system R11): the one shared duration/easing become
+     Tailwind's default transition variables, so plain `transition`/
+     `transition-colors`/`transition-shadow` (no duration- or ease- class)
+     already use them. Movement utilities (translate/scale/rotate) are only
+     ever used behind `motion-safe:` (enforced by the static test), which is
+     Tailwind's built-in `prefers-reduced-motion` mechanism. */
+  --default-transition-duration: 150ms;
+  --default-transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
 }
