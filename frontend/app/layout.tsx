@@ -1,7 +1,8 @@
 import { ConvexAuthNextjsServerProvider } from "@convex-dev/auth/nextjs/server";
 import { ReactNode } from "react";
+import { AppShell } from "../components/shell/AppShell";
+import "../styles/globals.css";
 import { Providers } from "./providers";
-import { SiteHeader } from "./SiteHeader";
 
 export const metadata = {
   title: "Wavelink",
@@ -14,8 +15,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <html lang="en">
         <body>
           <Providers>
-            <SiteHeader />
-            {children}
+            <AppShell>{children}</AppShell>
           </Providers>
         </body>
       </html>

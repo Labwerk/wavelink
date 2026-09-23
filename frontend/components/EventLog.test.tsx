@@ -15,13 +15,14 @@ describe("EventLog", () => {
     expect(screen.getByText("45")).toBeInTheDocument();
   });
 
-  test("inserts a gap marker between entries spaced further apart than the threshold", () => {
+  test("inserts a gap marker between entries spaced further apart than the threshold (R13)", () => {
     const entries: EventLogReading[] = [
       { id: "e2", ts: 100_000, metric: "temperature_c", value: 50 },
       { id: "e1", ts: 1_000, metric: "temperature_c", value: 45 },
     ];
-    render(<EventLog entries={entries} gapThresholdMs={30_000} />);
+    const { container } = render(<EventLog entries={entries} gapThresholdMs={30_000} />);
     expect(screen.getByText(/gap of/i)).toBeInTheDocument();
+    expect(container.querySelector('[data-kind="warning"]')).toBeInTheDocument();
   });
 
   test("no gap marker when spacing is within the threshold", () => {

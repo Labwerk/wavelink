@@ -1,6 +1,7 @@
 "use client";
 
-import styles from "./FilterBar.module.css";
+import { Button } from "./ui/Button";
+import { Field, Label, SelectInput } from "./ui/Field";
 
 /** Sentinel for "no filter selected on this field" — kept out of the URL param. */
 export const ALL = "";
@@ -35,10 +36,10 @@ export function FilterBar({
   const isFiltered = value.zone !== ALL || value.type !== ALL || value.status !== ALL;
 
   return (
-    <div className={styles.bar}>
-      <label className={styles.field}>
-        Zone
-        <select
+    <div className="mb-4 flex flex-wrap items-end gap-4">
+      <Field>
+        <Label>Zone</Label>
+        <SelectInput
           aria-label="Filter by zone"
           value={value.zone}
           onChange={(event) => onChange({ ...value, zone: event.target.value })}
@@ -49,11 +50,11 @@ export function FilterBar({
               {zone}
             </option>
           ))}
-        </select>
-      </label>
-      <label className={styles.field}>
-        Type
-        <select
+        </SelectInput>
+      </Field>
+      <Field>
+        <Label>Type</Label>
+        <SelectInput
           aria-label="Filter by type"
           value={value.type}
           onChange={(event) => onChange({ ...value, type: event.target.value })}
@@ -64,11 +65,11 @@ export function FilterBar({
               {type}
             </option>
           ))}
-        </select>
-      </label>
-      <label className={styles.field}>
-        Status
-        <select
+        </SelectInput>
+      </Field>
+      <Field>
+        <Label>Status</Label>
+        <SelectInput
           aria-label="Filter by status"
           value={value.status}
           onChange={(event) => onChange({ ...value, status: event.target.value })}
@@ -79,16 +80,16 @@ export function FilterBar({
               {status}
             </option>
           ))}
-        </select>
-      </label>
+        </SelectInput>
+      </Field>
       {isFiltered && (
-        <button
+        <Button
           type="button"
-          className={styles.clear}
+          variant="secondary"
           onClick={() => onChange({ zone: ALL, type: ALL, status: ALL })}
         >
           Clear filters
-        </button>
+        </Button>
       )}
     </div>
   );

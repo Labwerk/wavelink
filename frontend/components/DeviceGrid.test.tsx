@@ -46,4 +46,18 @@ describe("DeviceGrid", () => {
     expect(screen.getByText("A")).toBeInTheDocument();
     expect(screen.getByText("B")).toBeInTheDocument();
   });
+
+  test("groups by status render the heading as a StatusBadge, not a bare status word (R13)", () => {
+    const devices = [
+      device({ deviceId: "d1", name: "A", status: "online" }),
+      device({ deviceId: "d2", name: "B", status: "offline" }),
+    ];
+    const { container } = render(<DeviceGrid devices={devices} now={1_000} groupBy="status" />);
+
+    const onlineHeading = screen.getByRole("heading", { name: "Online" });
+    expect(onlineHeading.querySelector('[data-kind="online"]')).toBeInTheDocument();
+    const offlineHeading = screen.getByRole("heading", { name: "Offline" });
+    expect(offlineHeading.querySelector('[data-kind="offline"]')).toBeInTheDocument();
+    expect(container.querySelectorAll("svg[aria-hidden]").length).toBeGreaterThan(0);
+  });
 });

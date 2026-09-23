@@ -7,21 +7,23 @@ import { api } from "../../backend/_generated/api";
 import { useNow } from "../lib/useNow";
 import { ALL, FilterBar, type FilterValue } from "../components/FilterBar";
 import { DeviceGrid, type GroupBy } from "../components/DeviceGrid";
+import { PageHeading } from "../components/ui/PageHeading";
+import { Field, Label, SelectInput } from "../components/ui/Field";
 
 const GROUP_BY_OPTIONS: readonly GroupBy[] = ["none", "zone", "type", "status"];
 
 // The proxy (frontend/proxy.ts) already sends signed-out visitors to /signin
-// (R1); the signed-in header (email/role, sign-out, admin/devices links)
-// lives in `SiteHeader` (frontend/app/SiteHeader.tsx), rendered from the
-// root layout so it's shared with the device registry at /devices instead
-// of duplicated here. Device registration/editing/decommissioning is that
+// (R1); the signed-in identity, sign-out and role-filtered navigation live in
+// `AppShell` (frontend/components/shell), rendered from the root layout so
+// they are shared with every other page instead of duplicated here. Device
+// registration/editing/decommissioning is that
 // registry's job (explicit non-goal — specs/live-telemetry-view/spec.md);
 // this page is read-only live status.
 export default function LiveOverviewPage() {
   // useSearchParams requires a Suspense boundary above it so the rest of the
   // route can still be prerendered (see frontend/AGENTS.md — Next 16 docs).
   return (
-    <Suspense fallback={<main style={{ padding: "2rem" }}>Loading…</main>}>
+    <Suspense fallback={<main>Loading…</main>}>
       <Overview />
     </Suspense>
   );
@@ -71,8 +73,8 @@ function Overview() {
   });
 
   return (
-    <main style={{ padding: "2rem", fontFamily: "sans-serif" }}>
-      <h1>Devices</h1>
+    <main className="space-y-4">
+      <PageHeading>Devices</PageHeading>
       {devices === undefined && <p>Loading…</p>}
       {devices?.length === 0 && <p>No active devices yet. Start the simulator to seed data.</p>}
       {devices !== undefined && devices.length > 0 && (
@@ -84,21 +86,19 @@ function Overview() {
             value={filterValue}
             onChange={(next) => updateParams(next)}
           />
-          <div style={{ marginBottom: "1rem", fontSize: "0.85rem" }}>
-            <label>
-              Group by:{" "}
-              <select
-                aria-label="Group by"
-                value={groupBy}
-                onChange={(event) => updateParams({ groupBy: event.target.value as GroupBy })}
-              >
-                <option value="none">None</option>
-                <option value="zone">Zone</option>
-                <option value="type">Type</option>
-                <option value="status">Status</option>
-              </select>
-            </label>
-          </div>
+          <Field className="max-w-xs">
+            <Label>Group by</Label>
+            <SelectInput
+              aria-label="Group by"
+              value={groupBy}
+              onChange={(event) => updateParams({ groupBy: event.target.value as GroupBy })}
+            >
+              <option value="none">None</option>
+              <option value="zone">Zone</option>
+              <option value="type">Type</option>
+              <option value="status">Status</option>
+            </SelectInput>
+          </Field>
           <DeviceGrid devices={filtered} now={now} groupBy={groupBy} />
         </>
       )}

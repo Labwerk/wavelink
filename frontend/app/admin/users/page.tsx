@@ -5,6 +5,11 @@ import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { api } from "../../../../backend/_generated/api";
 import type { Id } from "../../../../backend/_generated/dataModel";
+import { StatusBadge } from "../../../components/StatusBadge";
+import { Button } from "../../../components/ui/Button";
+import { ErrorText, Field, FieldGroup, Label, SelectInput, TextInput } from "../../../components/ui/Field";
+import { PageHeading } from "../../../components/ui/PageHeading";
+import { TBody, Td, Th, THead, Table, Tr } from "../../../components/ui/Table";
 
 const ROLES = ["viewer", "operator", "maintenance", "admin"] as const;
 type Role = (typeof ROLES)[number];
@@ -18,14 +23,14 @@ export default function AdminUsersPage() {
 
   if (me === undefined) {
     return (
-      <main style={{ padding: "2rem", fontFamily: "sans-serif" }}>
+      <main>
         <p>Loading…</p>
       </main>
     );
   }
   if (me === null || !me.capabilities.includes("user.manage")) {
     return (
-      <main style={{ padding: "2rem", fontFamily: "sans-serif" }}>
+      <main>
         <p>Not available.</p>
         <Link href="/">Back to dashboard</Link>
       </main>
@@ -62,30 +67,27 @@ function UserAdmin({ currentUserId }: { currentUserId: Id<"users"> }) {
   const emailById = new Map(users?.map((u) => [u._id, u.email]));
 
   return (
-    <main style={{ padding: "2rem", fontFamily: "sans-serif" }}>
-      <header style={{ display: "flex", justifyContent: "space-between", marginBottom: "1.5rem" }}>
-        <h1 style={{ margin: 0 }}>Users</h1>
-        <Link href="/">Back to dashboard</Link>
-      </header>
+    <main className="space-y-6">
+      <PageHeading actions={<Link href="/">Back to dashboard</Link>}>Users</PageHeading>
 
-      {error && <p style={{ color: "crimson" }}>{error}</p>}
+      {error && <ErrorText>{error}</ErrorText>}
       {users === undefined && <p>Loading…</p>}
-      <table>
-        <thead>
-          <tr>
-            <th style={{ textAlign: "left" }}>Email</th>
-            <th style={{ textAlign: "left" }}>Name</th>
-            <th style={{ textAlign: "left" }}>Role</th>
-            <th style={{ textAlign: "left" }}>Status</th>
-          </tr>
-        </thead>
-        <tbody>
+      <Table>
+        <THead>
+          <Tr>
+            <Th>Email</Th>
+            <Th>Name</Th>
+            <Th>Role</Th>
+            <Th>Status</Th>
+          </Tr>
+        </THead>
+        <TBody>
           {users?.map((u) => (
-            <tr key={u._id}>
-              <td>{u.email}</td>
-              <td>{u.name}</td>
-              <td>
-                <select
+            <Tr key={u._id}>
+              <Td>{u.email}</Td>
+              <Td>{u.name}</Td>
+              <Td>
+                <SelectInput
                   value={u.role}
                   aria-label={`Role for ${u.email}`}
                   onChange={(e) => void handleRoleChange(u._id, e.target.value as Role)}
@@ -95,54 +97,56 @@ function UserAdmin({ currentUserId }: { currentUserId: Id<"users"> }) {
                       {r}
                     </option>
                   ))}
-                </select>
+                </SelectInput>
                 {u._id === currentUserId && <span> (you)</span>}
-              </td>
-              <td>
-                {u.isActive ? "Active" : "Deactivated"}{" "}
+              </Td>
+              <Td>
+                <StatusBadge kind={u.isActive ? "active" : "inactive"} label={u.isActive ? "Active" : "Deactivated"} />{" "}
                 {u._id !== currentUserId && (
-                  <button onClick={() => void handleActiveChange(u._id, !u.isActive)}>
+                  <Button variant="secondary" onClick={() => void handleActiveChange(u._id, !u.isActive)}>
                     {u.isActive ? "Deactivate" : "Reactivate"}
-                  </button>
+                  </Button>
                 )}
-              </td>
-            </tr>
+              </Td>
+            </Tr>
           ))}
-        </tbody>
-      </table>
+        </TBody>
+      </Table>
 
       <CreateUserForm />
 
-      <h2 style={{ marginTop: "2rem" }}>Recent changes</h2>
-      <table>
-        <thead>
-          <tr>
-            <th style={{ textAlign: "left" }}>When</th>
-            <th style={{ textAlign: "left" }}>Who</th>
-            <th style={{ textAlign: "left" }}>Action</th>
-            <th style={{ textAlign: "left" }}>Details</th>
-          </tr>
-        </thead>
-        <tbody>
-          {audit?.map((a) => (
-            <tr key={a._id}>
-              <td>{new Date(a.at).toLocaleString()}</td>
-              <td>{a.actorId ? (emailById.get(a.actorId) ?? a.actorId) : "deployment admin key"}</td>
-              <td>{a.action}</td>
-              <td>
-                {a.targetTable === "users" && a.targetId
-                  ? `${emailById.get(a.targetId as Id<"users">) ?? a.targetId} `
-                  : ""}
-                {a.details
-                  ? Object.entries(a.details)
-                      .map(([k, v]) => `${k}: ${v}`)
-                      .join(", ")
-                  : ""}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="space-y-2">
+        <h2 className="text-xl font-semibold text-fg">Recent changes</h2>
+        <Table>
+          <THead>
+            <Tr>
+              <Th>When</Th>
+              <Th>Who</Th>
+              <Th>Action</Th>
+              <Th>Details</Th>
+            </Tr>
+          </THead>
+          <TBody>
+            {audit?.map((a) => (
+              <Tr key={a._id}>
+                <Td>{new Date(a.at).toLocaleString()}</Td>
+                <Td>{a.actorId ? (emailById.get(a.actorId) ?? a.actorId) : "deployment admin key"}</Td>
+                <Td>{a.action}</Td>
+                <Td>
+                  {a.targetTable === "users" && a.targetId
+                    ? `${emailById.get(a.targetId as Id<"users">) ?? a.targetId} `
+                    : ""}
+                  {a.details
+                    ? Object.entries(a.details)
+                        .map(([k, v]) => `${k}: ${v}`)
+                        .join(", ")
+                    : ""}
+                </Td>
+              </Tr>
+            ))}
+          </TBody>
+        </Table>
+      </div>
     </main>
   );
 }
@@ -175,31 +179,39 @@ function CreateUserForm() {
   }
 
   return (
-    <form
-      onSubmit={handleSubmit}
-      style={{ marginTop: "1.5rem", borderTop: "1px solid #ddd", paddingTop: "1rem" }}
-    >
-      <h2>Create user</h2>
-      <div style={{ display: "grid", gap: "0.5rem", maxWidth: 320 }}>
-        <input name="email" type="email" placeholder="Email" required />
-        <input name="name" placeholder="Display name (optional)" />
-        <input
-          name="temporaryPassword"
-          type="password"
-          placeholder="Temporary password (min 8 chars)"
-          required
-          minLength={8}
-          autoComplete="new-password"
-        />
-        {error && <p style={{ color: "crimson" }}>{error}</p>}
+    <form onSubmit={handleSubmit} className="border-t border-border pt-4 max-w-xs">
+      <FieldGroup>
+        <h2 className="text-xl font-semibold text-fg">Create user</h2>
+        <Field>
+          <Label>Email</Label>
+          <TextInput name="email" type="email" placeholder="Email" required />
+        </Field>
+        <Field>
+          <Label>Display name (optional)</Label>
+          <TextInput name="name" placeholder="Display name (optional)" />
+        </Field>
+        <Field>
+          <Label>Temporary password (min 8 chars)</Label>
+          <TextInput
+            name="temporaryPassword"
+            type="password"
+            placeholder="Temporary password (min 8 chars)"
+            required
+            minLength={8}
+            autoComplete="new-password"
+          />
+        </Field>
+        {error && <ErrorText>{error}</ErrorText>}
         {created && (
           <p>
             Created {created} as viewer. Share the temporary password out-of-band, then promote
             their role above if needed.
           </p>
         )}
-        <button type="submit">Create user</button>
-      </div>
+        <Button type="submit" variant="primary">
+          Create user
+        </Button>
+      </FieldGroup>
     </form>
   );
 }

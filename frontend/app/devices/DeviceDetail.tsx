@@ -1,41 +1,14 @@
 "use client";
 
 import { useMutation, useQuery } from "convex/react";
-import { useState } from "react";
+import { Disclosure, DisclosureButton, DisclosurePanel } from "@headlessui/react";
 import { api } from "../../../backend/_generated/api";
 import type { Id } from "../../../backend/_generated/dataModel";
+import { StatusBadge } from "../../components/StatusBadge";
+import { Button, buttonClasses } from "../../components/ui/Button";
+import { TBody, Td, Th, THead, Table, Tr } from "../../components/ui/Table";
+import { useState } from "react";
 import { DeviceForm, fieldErrorsFrom, metadataToRecord, type DeviceFormValues } from "./DeviceForm";
-
-const CONNECTIVITY_LABEL: Record<string, string> = {
-  online: "Online",
-  offline: "Offline",
-  unknown: "Unknown",
-};
-
-const CONNECTIVITY_COLOR: Record<string, string> = {
-  online: "#1a7f37",
-  offline: "#b42318",
-  unknown: "#666",
-};
-
-function Badge({ children, color, muted }: { children: React.ReactNode; color: string; muted?: boolean }) {
-  return (
-    <span
-      style={{
-        display: "inline-block",
-        padding: "0.15rem 0.5rem",
-        borderRadius: "999px",
-        fontSize: "0.8rem",
-        fontWeight: 600,
-        color: "#fff",
-        background: color,
-        opacity: muted ? 0.55 : 1,
-      }}
-    >
-      {children}
-    </span>
-  );
-}
 
 export function DeviceDetail({
   deviceId,
@@ -59,7 +32,6 @@ export function DeviceDetail({
   const reactivate = useMutation(api.devices.reactivate);
 
   const [editing, setEditing] = useState(false);
-  const [showHistory, setShowHistory] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
   if (device === undefined) return <p>Loading…</p>;
@@ -100,8 +72,8 @@ export function DeviceDetail({
 
   if (editing) {
     return (
-      <div>
-        <h2>Edit {device.name}</h2>
+      <div className="space-y-2">
+        <h2 className="text-xl font-semibold text-fg">Edit {device.name}</h2>
         <DeviceForm
           mode="edit"
           initial={{
@@ -122,17 +94,13 @@ export function DeviceDetail({
   }
 
   return (
-    <div>
-      <h2>{device.name}</h2>
-      <p style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+    <div className="space-y-4">
+      <h2 className="text-xl font-semibold text-fg">{device.name}</h2>
+      <p className="flex items-center gap-2">
         {/* R28: lifecycle is rendered separately and more prominently than connectivity —
             a decommissioned device is never shown merely as "offline". */}
-        <Badge color={isDecommissioned ? "#555" : "#0b5fff"}>
-          {isDecommissioned ? "Decommissioned" : "In service"}
-        </Badge>
-        <Badge color={CONNECTIVITY_COLOR[device.status]} muted={isDecommissioned}>
-          {CONNECTIVITY_LABEL[device.status]}
-        </Badge>
+        <StatusBadge kind={isDecommissioned ? "decommissioned" : "active"} label={isDecommissioned ? undefined : "In service"} />
+        <StatusBadge kind={device.status} />
       </p>
       <p>
         External ID: <code>{device.externalId}</code> · Type: {device.type}
@@ -140,7 +108,7 @@ export function DeviceDetail({
       </p>
       <p>Last seen: {device.lastSeenAt ? new Date(device.lastSeenAt).toLocaleString() : "never"}</p>
       {device.metadata && Object.keys(device.metadata).length > 0 && (
-        <ul>
+        <ul className="space-y-1">
           {Object.entries(device.metadata).map(([k, v]) => (
             <li key={k}>
               {k}: {v}
@@ -149,7 +117,7 @@ export function DeviceDetail({
         </ul>
       )}
       {(device.rejectedReadingCount ?? 0) > 0 && (
-        <p style={{ color: "#b45309" }}>
+        <p className="text-warning">
           {device.rejectedReadingCount} reading(s) rejected while decommissioned
           {device.lastRejectedReadingAt
             ? ` (last at ${new Date(device.lastRejectedReadingAt).toLocaleString()})`
@@ -159,70 +127,74 @@ export function DeviceDetail({
       )}
 
       {isAdmin && (
-        <div style={{ display: "flex", gap: "0.5rem", margin: "0.5rem 0" }}>
-          <button onClick={() => setEditing(true)} disabled={isDecommissioned}>
+        <div className="flex gap-2">
+          <Button variant="secondary" onClick={() => setEditing(true)} disabled={isDecommissioned}>
             Edit
-          </button>
-          <button onClick={handleLifecycleToggle}>
+          </Button>
+          <Button variant="secondary" onClick={handleLifecycleToggle}>
             {isDecommissioned ? "Reactivate" : "Decommission"}
-          </button>
+          </Button>
         </div>
       )}
-      {actionError && <p style={{ color: "crimson" }}>{actionError}</p>}
+      {actionError && <p className="text-danger">{actionError}</p>}
 
-      <table>
-        <thead>
-          <tr>
-            <th style={{ textAlign: "left" }}>Metric</th>
-            <th style={{ textAlign: "left" }}>Value</th>
-            <th style={{ textAlign: "left" }}>At</th>
-          </tr>
-        </thead>
-        <tbody>
+      <Table>
+        <THead>
+          <Tr>
+            <Th>Metric</Th>
+            <Th>Value</Th>
+            <Th>At</Th>
+          </Tr>
+        </THead>
+        <TBody>
           {readings?.map((r) => (
-            <tr key={r._id}>
-              <td>{r.metric}</td>
-              <td>{r.value}</td>
-              <td>{new Date(r.ts).toLocaleTimeString()}</td>
-            </tr>
+            <Tr key={r._id}>
+              <Td>{r.metric}</Td>
+              <Td>{r.value}</Td>
+              <Td>{new Date(r.ts).toLocaleTimeString()}</Td>
+            </Tr>
           ))}
-        </tbody>
-      </table>
+        </TBody>
+      </Table>
 
       {isAdmin && (
-        <div style={{ marginTop: "1rem" }}>
-          <button onClick={() => setShowHistory((v) => !v)}>
-            {showHistory ? "Hide" : "Show"} change history
-          </button>
-          {showHistory && (
-            <table style={{ marginTop: "0.5rem" }}>
-              <thead>
-                <tr>
-                  <th style={{ textAlign: "left" }}>When</th>
-                  <th style={{ textAlign: "left" }}>Who</th>
-                  <th style={{ textAlign: "left" }}>Action</th>
-                  <th style={{ textAlign: "left" }}>Changes</th>
-                </tr>
-              </thead>
-              <tbody>
-                {history?.map((h) => (
-                  <tr key={h._id}>
-                    <td>{new Date(h.at).toLocaleString()}</td>
-                    <td>{h.actorId ? (emailById.get(h.actorId) ?? h.actorId) : "deployment admin key"}</td>
-                    <td>{h.action}</td>
-                    <td>
-                      {!h.changes || h.changes.length === 0
-                        ? "—"
-                        : h.changes
-                            .map((c) => `${c.field}: ${c.before ?? "∅"} → ${c.after ?? "∅"}`)
-                            .join("; ")}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <Disclosure>
+          {({ open }) => (
+            <>
+              <DisclosureButton className={buttonClasses("secondary")}>
+                {open ? "Hide" : "Show"} change history
+              </DisclosureButton>
+              <DisclosurePanel className="mt-2">
+                <Table>
+                  <THead>
+                    <Tr>
+                      <Th>When</Th>
+                      <Th>Who</Th>
+                      <Th>Action</Th>
+                      <Th>Changes</Th>
+                    </Tr>
+                  </THead>
+                  <TBody>
+                    {history?.map((h) => (
+                      <Tr key={h._id}>
+                        <Td>{new Date(h.at).toLocaleString()}</Td>
+                        <Td>{h.actorId ? (emailById.get(h.actorId) ?? h.actorId) : "deployment admin key"}</Td>
+                        <Td>{h.action}</Td>
+                        <Td>
+                          {!h.changes || h.changes.length === 0
+                            ? "—"
+                            : h.changes
+                                .map((c) => `${c.field}: ${c.before ?? "∅"} → ${c.after ?? "∅"}`)
+                                .join("; ")}
+                        </Td>
+                      </Tr>
+                    ))}
+                  </TBody>
+                </Table>
+              </DisclosurePanel>
+            </>
           )}
-        </div>
+        </Disclosure>
       )}
     </div>
   );

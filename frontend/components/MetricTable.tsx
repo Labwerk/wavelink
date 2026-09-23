@@ -1,6 +1,6 @@
 "use client";
 
-import styles from "./MetricTable.module.css";
+import { TBody, Td, Th, THead, Table, Tr } from "./ui/Table";
 
 export interface MetricRow {
   metric: string;
@@ -19,23 +19,23 @@ export function MetricTable({ metrics }: { metrics: readonly MetricRow[] }) {
   }
 
   return (
-    <table className={styles.table}>
-      <thead>
-        <tr>
-          <th>Metric</th>
-          <th>Value</th>
-          <th>At</th>
-        </tr>
-      </thead>
-      <tbody>
+    <Table>
+      <THead>
+        <Tr>
+          <Th>Metric</Th>
+          <Th>Value</Th>
+          <Th>At</Th>
+        </Tr>
+      </THead>
+      <TBody>
         {metrics.map((metric) => (
-          <tr key={metric.metric}>
-            <td>{metric.metric}</td>
-            <td>{metric.value === null ? "—" : metric.value}</td>
-            <td>{metric.ts === null ? "—" : new Date(metric.ts).toLocaleTimeString()}</td>
-          </tr>
+          <Tr key={metric.metric}>
+            <Td>{metric.metric}</Td>
+            <Td>{metric.value === null ? "—" : metric.value}</Td>
+            <Td>{metric.ts === null ? "—" : new Date(metric.ts).toLocaleTimeString()}</Td>
+          </Tr>
         ))}
-      </tbody>
-    </table>
+      </TBody>
+    </Table>
   );
 }

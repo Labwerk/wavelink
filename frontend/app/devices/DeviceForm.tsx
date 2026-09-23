@@ -1,7 +1,10 @@
 "use client";
 
+import { Fieldset, Legend } from "@headlessui/react";
 import { useState } from "react";
 import { ConvexError } from "convex/values";
+import { Button } from "../../components/ui/Button";
+import { Description, ErrorText, Field, FieldGroup, Label, TextInput } from "../../components/ui/Field";
 
 export type FieldErrors = Record<string, string>;
 
@@ -103,104 +106,98 @@ export function DeviceForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-      {errors._form && <p style={{ color: "crimson" }}>{errors._form}</p>}
+    <form onSubmit={handleSubmit}>
+      <FieldGroup>
+        {errors._form && <ErrorText>{errors._form}</ErrorText>}
 
-      <label>
-        External identifier
-        <input
-          value={values.externalId}
-          disabled={mode === "edit"}
-          onChange={(e) => setValues((v) => ({ ...v, externalId: e.target.value }))}
-          style={{ display: "block", width: "100%" }}
-        />
-        {mode === "edit" && (
-          <small style={{ color: "#666" }}>Immutable after registration — cannot be edited.</small>
-        )}
-        {errors.externalId && <small style={{ color: "crimson" }}>{errors.externalId}</small>}
-      </label>
+        <Field>
+          <Label>External identifier</Label>
+          <TextInput
+            value={values.externalId}
+            disabled={mode === "edit"}
+            onChange={(e) => setValues((v) => ({ ...v, externalId: e.target.value }))}
+          />
+          {mode === "edit" && <Description>Immutable after registration — cannot be edited.</Description>}
+          {errors.externalId && <ErrorText>{errors.externalId}</ErrorText>}
+        </Field>
 
-      <label>
-        Name
-        <input
-          value={values.name}
-          onChange={(e) => setValues((v) => ({ ...v, name: e.target.value }))}
-          style={{ display: "block", width: "100%" }}
-        />
-        {errors.name && <small style={{ color: "crimson" }}>{errors.name}</small>}
-      </label>
+        <Field>
+          <Label>Name</Label>
+          <TextInput value={values.name} onChange={(e) => setValues((v) => ({ ...v, name: e.target.value }))} />
+          {errors.name && <ErrorText>{errors.name}</ErrorText>}
+        </Field>
 
-      <label>
-        Type
-        <input
-          list="device-type-suggestions"
-          value={values.type}
-          onChange={(e) => setValues((v) => ({ ...v, type: e.target.value }))}
-          style={{ display: "block", width: "100%" }}
-        />
-        <datalist id="device-type-suggestions">
-          {typeSuggestions.map((t) => (
-            <option key={t} value={t} />
+        <Field>
+          <Label>Type</Label>
+          <TextInput
+            list="device-type-suggestions"
+            value={values.type}
+            onChange={(e) => setValues((v) => ({ ...v, type: e.target.value }))}
+          />
+          <datalist id="device-type-suggestions">
+            {typeSuggestions.map((t) => (
+              <option key={t} value={t} />
+            ))}
+          </datalist>
+          {errors.type && <ErrorText>{errors.type}</ErrorText>}
+        </Field>
+
+        <Field>
+          <Label>Zone (optional)</Label>
+          <TextInput
+            list="device-zone-suggestions"
+            value={values.zone}
+            onChange={(e) => setValues((v) => ({ ...v, zone: e.target.value }))}
+          />
+          <datalist id="device-zone-suggestions">
+            {zoneSuggestions.map((z) => (
+              <option key={z} value={z} />
+            ))}
+          </datalist>
+          {errors.zone && <ErrorText>{errors.zone}</ErrorText>}
+        </Field>
+
+        <Fieldset className="rounded-md border border-border p-2 space-y-2">
+          <Legend className="text-sm font-medium text-fg">Metadata (optional)</Legend>
+          {values.metadata.map((row, i) => (
+            <div key={i} className="flex gap-2">
+              <Field className="flex-1">
+                <Label>Key</Label>
+                <TextInput value={row.key} onChange={(e) => updateMetadataRow(i, { key: e.target.value })} />
+              </Field>
+              <Field className="flex-1">
+                <Label>Value</Label>
+                <TextInput value={row.value} onChange={(e) => updateMetadataRow(i, { value: e.target.value })} />
+              </Field>
+              <Button
+                type="button"
+                variant="secondary"
+                className="self-end"
+                onClick={() => setValues((v) => ({ ...v, metadata: v.metadata.filter((_, j) => j !== i) }))}
+              >
+                Remove
+              </Button>
+            </div>
           ))}
-        </datalist>
-        {errors.type && <small style={{ color: "crimson" }}>{errors.type}</small>}
-      </label>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => setValues((v) => ({ ...v, metadata: [...v.metadata, { key: "", value: "" }] }))}
+          >
+            Add entry
+          </Button>
+          {errors.metadata && <ErrorText>{errors.metadata}</ErrorText>}
+        </Fieldset>
 
-      <label>
-        Zone (optional)
-        <input
-          list="device-zone-suggestions"
-          value={values.zone}
-          onChange={(e) => setValues((v) => ({ ...v, zone: e.target.value }))}
-          style={{ display: "block", width: "100%" }}
-        />
-        <datalist id="device-zone-suggestions">
-          {zoneSuggestions.map((z) => (
-            <option key={z} value={z} />
-          ))}
-        </datalist>
-        {errors.zone && <small style={{ color: "crimson" }}>{errors.zone}</small>}
-      </label>
-
-      <fieldset style={{ border: "1px solid #ddd", padding: "0.5rem" }}>
-        <legend>Metadata (optional)</legend>
-        {values.metadata.map((row, i) => (
-          <div key={i} style={{ display: "flex", gap: "0.5rem", marginBottom: "0.25rem" }}>
-            <input
-              placeholder="key"
-              value={row.key}
-              onChange={(e) => updateMetadataRow(i, { key: e.target.value })}
-            />
-            <input
-              placeholder="value"
-              value={row.value}
-              onChange={(e) => updateMetadataRow(i, { value: e.target.value })}
-            />
-            <button
-              type="button"
-              onClick={() => setValues((v) => ({ ...v, metadata: v.metadata.filter((_, j) => j !== i) }))}
-            >
-              Remove
-            </button>
-          </div>
-        ))}
-        <button
-          type="button"
-          onClick={() => setValues((v) => ({ ...v, metadata: [...v.metadata, { key: "", value: "" }] }))}
-        >
-          Add entry
-        </button>
-        {errors.metadata && <p style={{ color: "crimson" }}>{errors.metadata}</p>}
-      </fieldset>
-
-      <div style={{ display: "flex", gap: "0.5rem" }}>
-        <button type="submit" disabled={submitting}>
-          {mode === "register" ? "Register device" : "Save changes"}
-        </button>
-        <button type="button" onClick={onCancel} disabled={submitting}>
-          Cancel
-        </button>
-      </div>
+        <div className="flex gap-2">
+          <Button type="submit" variant="primary" disabled={submitting}>
+            {mode === "register" ? "Register device" : "Save changes"}
+          </Button>
+          <Button type="button" variant="secondary" onClick={onCancel} disabled={submitting}>
+            Cancel
+          </Button>
+        </div>
+      </FieldGroup>
     </form>
   );
 }
